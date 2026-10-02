@@ -1,0 +1,182 @@
+{
+  "users": {},
+  "menus": {
+    "menu_001": {
+      "id": "menu_001",
+      "name": "Spaghetti Carbonara",
+      "category": "Pasta",
+      "price": 189,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "spice": [
+          "Normal",
+          "Spicy"
+        ],
+        "extra_egg": [
+          "No",
+          "Yes"
+        ]
+      }
+    },
+    "menu_002": {
+      "id": "menu_002",
+      "name": "Spaghetti Bolognese",
+      "category": "Pasta",
+      "price": 179,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "spice": [
+          "Normal",
+          "Spicy"
+        ]
+      }
+    },
+    "menu_003": {
+      "id": "menu_003",
+      "name": "Fettuccine Alfredo",
+      "category": "Pasta",
+      "price": 199,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "size": [
+          "Regular",
+          "Large"
+        ]
+      }
+    },
+    "menu_004": {
+      "id": "menu_004",
+      "name": "Margherita Pizza",
+      "category": "Pizza",
+      "price": 249,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "size": [
+          "10 inch",
+          "12 inch"
+        ]
+      }
+    },
+    "menu_005": {
+      "id": "menu_005",
+      "name": "Pepperoni Pizza",
+      "category": "Pizza",
+      "price": 289,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "size": [
+          "10 inch",
+          "12 inch"
+        ]
+      }
+    },
+    "menu_006": {
+      "id": "menu_006",
+      "name": "Italian Herb Steak",
+      "category": "Steak",
+      "price": 399,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "doneness": [
+          "Medium Rare",
+          "Medium",
+          "Well Done"
+        ]
+      }
+    },
+    "menu_007": {
+      "id": "menu_007",
+      "name": "Caesar Salad",
+      "category": "Salad",
+      "price": 149,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "extra_cheese": [
+          "No",
+          "Yes"
+        ]
+      }
+    },
+    "menu_008": {
+      "id": "menu_008",
+      "name": "Tiramisu",
+      "category": "Dessert",
+      "price": 129,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {}
+    },
+    "menu_009": {
+      "id": "menu_009",
+      "name": "Panna Cotta",
+      "category": "Dessert",
+      "price": 119,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {}
+    },
+    "menu_010": {
+      "id": "menu_010",
+      "name": "Italian Espresso",
+      "category": "Drinks",
+      "price": 75,
+      "image_url": "",
+      "is_out_of_stock": false,
+      "options": {
+        "size": [
+          "Single",
+          "Double"
+        ]
+      }
+    }
+  },
+  "tables": {
+    "table_01": {
+      "id": "table_01",
+      "table_number": "01",
+      "status": "available",
+      "current_order_id": null
+    },
+    "table_02": {
+      "id": "table_02",
+      "table_number": "02",
+      "status": "available",
+      "current_order_id": null
+    },
+    "table_03": {
+      "id": "table_03",
+      "table_number": "03",
+      "status": "available",
+      "current_order_id": null
+    },
+    "table_04": {
+      "id": "table_04",
+      "table_number": "04",
+      "status": "available",
+      "current_order_id": null
+    },
+    "table_05": {
+      "id": "table_05",
+      "table_number": "05",
+      "status": "available",
+      "current_order_id": null
+    },
+    "table_06": {
+      "id": "table_06",
+      "table_number": "06",
+      "status": "available",
+      "current_order_id": null
+    }
+  },
+  "reservations": {},
+  "orders": {},
+  "kitchen": {},
+  "audit_logs": {}
+}

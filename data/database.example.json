@@ -1,0 +1,16 @@
+{
+  "users": {},
+  "menus": {},
+  "tables": {
+    "table_01": {"id": "table_01", "table_number": "01", "status": "available", "current_order_id": null},
+    "table_02": {"id": "table_02", "table_number": "02", "status": "available", "current_order_id": null},
+    "table_03": {"id": "table_03", "table_number": "03", "status": "available", "current_order_id": null},
+    "table_04": {"id": "table_04", "table_number": "04", "status": "available", "current_order_id": null},
+    "table_05": {"id": "table_05", "table_number": "05", "status": "available", "current_order_id": null},
+    "table_06": {"id": "table_06", "table_number": "06", "status": "available", "current_order_id": null}
+  },
+  "reservations": {},
+  "orders": {},
+  "kitchen": {},
+  "audit_logs": {}
+}
