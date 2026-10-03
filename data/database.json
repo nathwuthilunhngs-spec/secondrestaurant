@@ -1,5 +1,15 @@
 {
-  "users": {},
+  "users": {
+    "local_fcd87db8733a4a76": {
+      "id": "local_fcd87db8733a4a76",
+      "email": "admin@itailaew.com",
+      "name": "itailaew Admin",
+      "role": "admin",
+      "member_points": 0,
+      "active": true,
+      "password_hash": "pbkdf2_sha256$120000$360800526b0cd3ee3d7dfa36638b0b3f$57ac8873de5d31cd5fa74cc99e467bfbe407e8e53a58d36f284ad917db27230a"
+    }
+  },
   "menus": {
     "menu_001": {
       "id": "menu_001",
