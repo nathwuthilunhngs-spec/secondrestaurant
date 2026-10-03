@@ -1,33 +1,5 @@
 {
-  "users": {
-    "local_3bb3a54e18f54fd7": {
-      "id": "local_3bb3a54e18f54fd7",
-      "email": "admin@itailaew.com",
-      "name": "itailaew Admin",
-      "role": "admin",
-      "member_points": 0,
-      "active": true,
-      "password_hash": "pbkdf2_sha256$120000$461a6fec09e49841ef8269e8703a77d9$7d353fa7394bebd6b88432c1959d23fdfcd155efb635c23e842694d092322d5d"
-    },
-    "local_8b38997f151d4d29": {
-      "id": "local_8b38997f151d4d29",
-      "email": "soda_admin@gmail.com",
-      "name": "Soda_admin",
-      "role": "customer",
-      "member_points": 0,
-      "active": true,
-      "password_hash": "pbkdf2_sha256$120000$b53ea9b4d1d991126537a98c649683a2$858a8ca42dc18dc996b411b9fa0f5ff36faf8985a08eb5f9692f47ffc271b23c"
-    },
-    "local_3fb5cae590684b02": {
-      "id": "local_3fb5cae590684b02",
-      "email": "soda_staff@gmail.com",
-      "name": "Soda_staff",
-      "role": "staff",
-      "member_points": 0,
-      "active": true,
-      "password_hash": "pbkdf2_sha256$120000$0953a03cb5f8b03bea4efa92ead81ffe$dd04e7a67d3acea1565e9f197f2377941e1ed999718e5c3bfa8706ace4dacd0d"
-    }
-  },
+  "users": {},
   "menus": {
     "menu_001": {
       "id": "menu_001",
@@ -122,7 +94,7 @@
       "id": "menu_007",
       "name": "Caesar Salad",
       "category": "Salad",
-      "price": 149.0,
+      "price": 149,
       "image_url": "",
       "is_out_of_stock": false,
       "options": {
@@ -204,135 +176,7 @@
     }
   },
   "reservations": {},
-  "orders": {
-    "order_606b4534fded": {
-      "id": "order_606b4534fded",
-      "table_id": "table_01",
-      "table_number": "01",
-      "customer_id": null,
-      "items": [
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        }
-      ],
-      "subtotal": 149.0,
-      "discount": 9.0,
-      "service_charge": 14.0,
-      "tax": 10.78,
-      "total": 164.78,
-      "status": "closed",
-      "created_by": "local_3fb5cae590684b02",
-      "created_at": "2026-10-03T14:51:56.973709+00:00",
-      "closed_at": "2026-10-03T14:53:09.744216+00:00",
-      "closed_by": "local_3fb5cae590684b02"
-    }
-  },
-  "kitchen": {
-    "kit_6f3ffd58784a": {
-      "id": "kit_6f3ffd58784a",
-      "order_id": "order_606b4534fded",
-      "order_item_id": "order_606b4534fded_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "01",
-      "quantity": 1,
-      "status": "done",
-      "timestamp": "2026-10-03T14:51:56.979040+00:00",
-      "updated_at": "2026-10-03T14:52:32.126344+00:00"
-    }
-  },
-  "audit_logs": {
-    "42b6797c24bd4a3d9f5f": {
-      "id": "log_e663ce98068b",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_MENU",
-      "target_type": "menu",
-      "target_id": "menu_007",
-      "detail": "Caesar Salad",
-      "timestamp": "2026-10-03T13:21:48.143923+00:00"
-    },
-    "a696c3ca84f94fcf90b9": {
-      "id": "log_f560161d0e16",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_MENU",
-      "target_type": "menu",
-      "target_id": "menu_007",
-      "detail": "Caesar Salad",
-      "timestamp": "2026-10-03T13:21:57.326539+00:00"
-    },
-    "655f6a34782543f0b519": {
-      "id": "log_06b6d874ac4e",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_MENU",
-      "target_type": "menu",
-      "target_id": "menu_007",
-      "detail": "Caesar Salad",
-      "timestamp": "2026-10-03T13:22:02.399822+00:00"
-    },
-    "db6e5ed7d5154adc9abc": {
-      "id": "log_2ae8f44a9401",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "CREATE_STAFF",
-      "target_type": "user",
-      "target_id": "local_3fb5cae590684b02",
-      "detail": "soda_staff@gmail.com",
-      "timestamp": "2026-10-03T14:35:07.995229+00:00"
-    },
-    "b36bd3607718403ca6e8": {
-      "id": "log_82af81134bb1",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_USER_ACTIVE",
-      "target_type": "user",
-      "target_id": "local_3fb5cae590684b02",
-      "detail": "False",
-      "timestamp": "2026-10-03T14:35:12.489007+00:00"
-    },
-    "b5ace292f43d4b0190cd": {
-      "id": "log_96b537435b3a",
-      "user_id": "local_3bb3a54e18f54fd7",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_USER_ACTIVE",
-      "target_type": "user",
-      "target_id": "local_3fb5cae590684b02",
-      "detail": "True",
-      "timestamp": "2026-10-03T14:35:13.562149+00:00"
-    },
-    "8d41ea237252416fab19": {
-      "id": "log_0d9b6bf95e71",
-      "user_id": "local_3fb5cae590684b02",
-      "user_name": "Soda_staff",
-      "role": "staff",
-      "action": "CREATE_ORDER",
-      "target_type": "order",
-      "target_id": "order_606b4534fded",
-      "detail": "table=table_01",
-      "timestamp": "2026-10-03T14:51:56.981544+00:00"
-    },
-    "5db446fe433842d78a24": {
-      "id": "log_829c15668ceb",
-      "user_id": "local_3fb5cae590684b02",
-      "user_name": "Soda_staff",
-      "role": "staff",
-      "action": "CHECKOUT_ORDER",
-      "target_type": "order",
-      "target_id": "order_606b4534fded",
-      "detail": "164.78",
-      "timestamp": "2026-10-03T14:53:09.750374+00:00"
-    }
-  }
+  "orders": {},
+  "kitchen": {},
+  "audit_logs": {}
 }

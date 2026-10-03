@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timezone, timedelta
 import uuid
 import mimetypes
 import os
@@ -19,8 +18,7 @@ try:
     )
     from .biz_logic import (
         now_iso, clean_text, to_positive_number, to_positive_int, calculate_bill,
-        paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload,
-        parse_reservation_dt, find_reservation_conflict
+        paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload
     )
 except ImportError:
     # Supports `python api/index.py` from the project root as well as package imports on Vercel.
@@ -36,8 +34,7 @@ except ImportError:
     )
     from biz_logic import (
         now_iso, clean_text, to_positive_number, to_positive_int, calculate_bill,
-        paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload,
-        parse_reservation_dt, find_reservation_conflict
+        paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload
     )
 
 PUBLIC_GETS = {"/api/health", "/api/config"}
@@ -88,14 +85,6 @@ def find_by_id(collection, item_id):
             return item
         for value in data.values():
             if isinstance(value, dict) and value.get("id") == item_id:
-                return value
-    return None
-
-def find_table_by_number(table_number):
-    tables = get("tables") or {}
-    if isinstance(tables, dict):
-        for value in tables.values():
-            if isinstance(value, dict) and str(value.get("table_number")) == str(table_number).strip():
                 return value
     return None
 
@@ -193,15 +182,6 @@ class handler(BaseHTTPRequestHandler):
                     values = [r for r in values if r.get("customer_id") == profile.get("id")]
                 return response(self, 200, {"ok": True, "reservations": values})
 
-            if path.startswith("/api/orders/") and path.endswith("/bill"):
-                require_staff(profile)
-                order = find_by_id("orders", path.split("/")[-2])
-                if not order or order.get("status") in ("closed", "merged"):
-                    return error_response(self, 404, "ไม่พบออเดอร์หรือบิลถูกปิดแล้ว")
-                discount = to_positive_number(qs.get("discount", ["0"])[0] or 0, "ส่วนลด", allow_zero=True)
-                bill = calculate_bill(order.get("items", []), discount)
-                return response(self, 200, {"ok": True, "order": order, "bill": bill})
-
             if path == "/api/orders":
                 orders = get("orders") or {}
                 values = list(orders.values()) if isinstance(orders, dict) else []
@@ -241,52 +221,11 @@ class handler(BaseHTTPRequestHandler):
                         name = item.get("name", "Unknown")
                         sold[name] = sold.get(name, 0) + int(item.get("quantity", 0))
                 best = sorted([{"name": k, "quantity": v} for k, v in sold.items()], key=lambda x: x["quantity"], reverse=True)[:8]
-                # Daily sales for the last 7 days (oldest -> newest)
-                daily = {}
-                for i in range(6, -1, -1):
-                    daily[(datetime.now(timezone.utc) - timedelta(days=i)).strftime("%Y-%m-%d")] = 0.0
-                for o in closed:
-                    day = str(o.get("closed_at", ""))[:10]
-                    if day in daily:
-                        daily[day] = round(daily[day] + float(o.get("total", 0)), 2)
-                sales_7d = [{"date": k, "total": v} for k, v in daily.items()]
-                open_orders = len([o for o in values if o.get("status") not in ("closed", "merged")])
-                avg_bill = round(total_sales / len(closed), 2) if closed else 0.0
-                # Tables by status
-                tables = get("tables") or {}
-                table_values = [t for t in tables.values() if isinstance(t, dict)] if isinstance(tables, dict) else []
-                table_status = {"available": 0, "occupied": 0, "waiting_bill": 0, "reserved": 0}
-                for t in table_values:
-                    st = t.get("status", "available")
-                    table_status[st] = table_status.get(st, 0) + 1
-                # Reservations
-                reservations = get("reservations") or {}
-                res_values = [r for r in reservations.values() if isinstance(r, dict)] if isinstance(reservations, dict) else []
-                res_status = {}
-                for r in res_values:
-                    st = r.get("status", "waiting")
-                    res_status[st] = res_status.get(st, 0) + 1
-                res_today = len([r for r in res_values if str(r.get("datetime", "")).startswith(today)])
-                # Users by role
-                users = list_users()
-                user_roles = {"admin": 0, "staff": 0, "customer": 0}
-                for u in users:
-                    user_roles[u.get("role", "customer")] = user_roles.get(u.get("role", "customer"), 0) + 1
-                inactive_users = len([u for u in users if u.get("active") is False])
-                return response(self, 200, {
-                    "ok": True, "today_sales": today_sales, "total_sales": total_sales,
-                    "closed_orders": len(closed), "best_sellers": best,
-                    "open_orders": open_orders, "avg_bill": avg_bill, "sales_7d": sales_7d,
-                    "tables": {"total": len(table_values), **table_status},
-                    "reservations": {"total": len(res_values), "today": res_today, "by_status": res_status},
-                    "users": {"total": len(users), "inactive": inactive_users, **user_roles},
-                })
+                return response(self, 200, {"ok": True, "today_sales": today_sales, "total_sales": total_sales, "closed_orders": len(closed), "best_sellers": best})
 
             return error_response(self, 404, "ไม่พบ API ที่ร้องขอ")
         except AuthError as exc:
             return error_response(self, 403, str(exc))
-        except ValueError as exc:
-            return error_response(self, 400, str(exc))
         except Exception as exc:
             return error_response(self, 500, "เกิดข้อผิดพลาดภายในระบบ กรุณาลองใหม่")
 
@@ -358,29 +297,17 @@ class handler(BaseHTTPRequestHandler):
                 require_staff(profile)
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
                 table = find_by_id("tables", table_id)
-                if not table:
-                    raise ValueError("ไม่พบโต๊ะ")
-                if table.get("status") == "reserved":
-                    raise ValueError("โต๊ะนี้ถูกตั้งสถานะจองไว้ กรุณาจัดลูกค้าเข้านั่งก่อน")
+                ensure_table_can_order(table)
                 final_items = build_order_items(data.get("items"))
-                existing = find_by_id("orders", table["current_order_id"]) if table.get("current_order_id") else None
-                if existing and existing.get("status") not in ("closed", "merged"):
-                    # Table already has an open bill: add the new items to it
-                    order_id = existing["id"]
-                    all_items = existing.get("items", []) + final_items
-                    bill = calculate_bill(all_items, existing.get("discount", 0))
-                    patch(f"orders/{order_id}", {"items": all_items, **bill})
-                    order = {**existing, "items": all_items, **bill}
-                else:
-                    order_id = new_id("order")
-                    bill = calculate_bill(final_items, 0)
-                    order = {
-                        "id": order_id, "table_id": table_id, "table_number": table.get("table_number"),
-                        "customer_id": data.get("customer_id"), "items": final_items, **bill,
-                        "status": "open", "created_by": profile["id"], "created_at": now_iso()
-                    }
-                    put(f"orders/{order_id}", order)
-                    patch(f"tables/{table_id}", {"status": "occupied", "current_order_id": order_id})
+                order_id = new_id("order")
+                bill = calculate_bill(final_items, 0)
+                order = {
+                    "id": order_id, "table_id": table_id, "table_number": table.get("table_number"),
+                    "customer_id": data.get("customer_id"), "items": final_items, **bill,
+                    "status": "open", "created_by": profile["id"], "created_at": now_iso()
+                }
+                put(f"orders/{order_id}", order)
+                patch(f"tables/{table_id}", {"status": "occupied", "current_order_id": order_id})
                 for item in final_items:
                     kid = new_id("kit")
                     put(f"kitchen/{kid}", {
@@ -485,7 +412,6 @@ class handler(BaseHTTPRequestHandler):
                 merged_items = target_order.get("items", []) + source_order.get("items", [])
                 bill = calculate_bill(merged_items, target_order.get("discount", 0))
                 patch(f"orders/{target_order['id']}", {"items": merged_items, **bill, "merged_table_ids": [source_id, target_id]})
-                patch(f"orders/{source_order['id']}", {"status": "merged", "merged_into": target_order["id"]})
                 patch(f"tables/{source_id}", {"status": "available", "current_order_id": None})
                 audit(profile, "MERGE_TABLE", "table", target_id, f"source={source_id}")
                 return response(self, 200, {"ok": True, "message": "รวมโต๊ะสำเร็จ", "order_id": target_order["id"]})
@@ -494,26 +420,12 @@ class handler(BaseHTTPRequestHandler):
                 name = clean_text(data.get("customer_name"), "ชื่อ", 100)
                 phone = clean_text(data.get("phone"), "เบอร์โทร", 30)
                 table_number = clean_text(data.get("table_number"), "โต๊ะ", 20)
-                when_text = clean_text(data.get("datetime"), "วันเวลา", 60)
-                when = parse_reservation_dt(when_text)
-                if not find_table_by_number(table_number):
-                    raise ValueError("ไม่พบโต๊ะที่เลือก")
-                existing_res = get("reservations") or {}
-                existing_list = list(existing_res.values()) if isinstance(existing_res, dict) else []
-                clash = find_reservation_conflict(existing_list, table_number, when)
-                if clash:
-                    raise ValueError(f"โต๊ะ {table_number} ถูกจองไว้แล้วในช่วงเวลาใกล้เคียง ({clash.get('datetime')}) กรุณาเลือกเวลาหรือโต๊ะอื่น")
-                by_staff = profile.get("role") in ("admin", "staff")
                 reservation = {
-                    "id": new_id("res"), "customer_id": None if by_staff else profile["id"], "customer_name": name,
-                    "phone": phone, "table_number": table_number, "datetime": when_text,
-                    # A booking taken by staff (phone / walk-in) is confirmed immediately
-                    "status": "confirmed" if by_staff else "waiting",
-                    "source": "staff" if by_staff else "customer",
-                    "created_by": profile["id"], "created_at": now_iso()
+                    "id": new_id("res"), "customer_id": profile["id"], "customer_name": name,
+                    "phone": phone, "table_number": table_number, "datetime": clean_text(data.get("datetime"), "วันเวลา", 60),
+                    "status": "waiting", "created_at": now_iso()
                 }
                 put(f"reservations/{reservation['id']}", reservation)
-                audit(profile, "CREATE_RESERVATION", "reservation", reservation["id"], f"table={table_number} at={when_text}")
                 return response(self, 201, {"ok": True, "reservation": reservation})
 
             return error_response(self, 404, "ไม่พบ API ที่ร้องขอ")
@@ -564,27 +476,6 @@ class handler(BaseHTTPRequestHandler):
                 patch(f"tables/{table_id}", {"status": status})
                 return response(self, 200, {"ok": True, "message": "อัปเดตโต๊ะสำเร็จ"})
 
-            if path.startswith("/api/reservations/"):
-                require_staff(profile)
-                res_id = path.rsplit("/", 1)[-1]
-                reservation = find_by_id("reservations", res_id)
-                if not reservation:
-                    return error_response(self, 404, "ไม่พบการจอง")
-                new_status = data.get("status")
-                transitions = {"waiting": {"confirmed", "cancelled"}, "confirmed": {"seated", "cancelled"}}
-                if new_status not in transitions.get(reservation.get("status", "waiting"), set()):
-                    raise ValueError("ไม่สามารถเปลี่ยนสถานะการจองนี้ได้")
-                if new_status == "seated":
-                    table = find_table_by_number(reservation.get("table_number"))
-                    if not table:
-                        raise ValueError("ไม่พบโต๊ะของการจองนี้")
-                    if table.get("status") not in ("available", "reserved"):
-                        raise ValueError(f"โต๊ะ {table.get('table_number')} ยังไม่ว่าง จึงจัดเข้านั่งไม่ได้")
-                    patch(f"tables/{table['id']}", {"status": "occupied"})
-                patch(f"reservations/{res_id}", {"status": new_status, "updated_at": now_iso(), "updated_by": profile["id"]})
-                audit(profile, "UPDATE_RESERVATION", "reservation", res_id, new_status)
-                return response(self, 200, {"ok": True, "message": "อัปเดตการจองสำเร็จ"})
-
             if path.startswith("/api/kitchen/"):
                 require_staff(profile)
                 item_id = path.rsplit("/", 1)[-1]
@@ -600,7 +491,7 @@ class handler(BaseHTTPRequestHandler):
                 order = find_by_id("orders", order_id)
                 if not order:
                     return error_response(self, 404, "ไม่พบออเดอร์")
-                if order.get("status") in ("closed", "merged"):
+                if order.get("status") == "closed":
                     return error_response(self, 400, "ไม่สามารถเช็คบิลซ้ำได้")
                 discount = to_positive_number(data.get("discount", 0), "ส่วนลด", allow_zero=True)
                 bill = calculate_bill(order.get("items", []), discount)

@@ -1,8 +1,8 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 try:
-    from .config import VAT_RATE, SERVICE_CHARGE_RATE, RESERVATION_SLOT_MINUTES
+    from .config import VAT_RATE, SERVICE_CHARGE_RATE
 except ImportError:
-    from config import VAT_RATE, SERVICE_CHARGE_RATE, RESERVATION_SLOT_MINUTES
+    from config import VAT_RATE, SERVICE_CHARGE_RATE
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -43,8 +43,6 @@ def calculate_bill(items, discount=0, service_rate=SERVICE_CHARGE_RATE):
             price = to_positive_number(item.get("unit_price", 0), "ราคา")
             subtotal += price * qty
         discount = to_positive_number(discount or 0, "ส่วนลด", allow_zero=True)
-        if discount > subtotal:
-            raise ValueError("ส่วนลดต้องไม่เกินยอดรวม")
         service_charge = max(0.0, (subtotal - discount) * float(service_rate))
         taxable = max(0.0, subtotal - discount + service_charge)
         tax = taxable * VAT_RATE
@@ -134,33 +132,3 @@ def validate_menu_payload(data):
         "is_out_of_stock": bool(data.get("is_out_of_stock", False)),
         "options": options
     }
-
-
-ACTIVE_RESERVATION_STATUSES = {"waiting", "confirmed", "seated"}
-
-
-def parse_reservation_dt(value):
-    """Parse the datetime-local string sent by the browser (e.g. 2026-10-03T19:00)."""
-    try:
-        return datetime.fromisoformat(str(value).strip())
-    except (ValueError, TypeError):
-        raise ValueError("รูปแบบวันและเวลาไม่ถูกต้อง")
-
-
-def find_reservation_conflict(reservations, table_number, when, ignore_id=None, slot_minutes=RESERVATION_SLOT_MINUTES):
-    """Return the existing active reservation that overlaps `when` for the same table, or None."""
-    window = timedelta(minutes=slot_minutes)
-    for res in reservations:
-        if not isinstance(res, dict) or res.get("id") == ignore_id:
-            continue
-        if str(res.get("table_number")) != str(table_number):
-            continue
-        if res.get("status", "waiting") not in ACTIVE_RESERVATION_STATUSES:
-            continue
-        try:
-            other = parse_reservation_dt(res.get("datetime"))
-        except ValueError:
-            continue
-        if abs(other - when) < window:
-            return res
-    return None
