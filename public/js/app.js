@@ -1,5 +1,5 @@
 const App = (() => {
-  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, qrTable: new URLSearchParams(location.search).get("table") };
+  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, selectedTable: JSON.parse(localStorage.getItem("itailaew_selected_table") || "null"), cart: JSON.parse(localStorage.getItem("itailaew_cart") || "{}"), menus: [], gameTimer: null };
   const $ = id => document.getElementById(id);
 
   async function api(path, options = {}) {
@@ -8,7 +8,7 @@ const App = (() => {
     const res = await fetch(path, {...options, headers});
     let data = {};
     try { data = await res.json(); } catch (_) {}
-    if (!res.ok || data.ok === false) throw new Error(data.message || "เกิดข้อผิดพลาด");
+    if (!res.ok || data.ok === false) { const msg = typeof data.message === "string" ? data.message : (data.message?.code === "TABLE_GAME" ? "มีผู้เลือกโต๊ะนี้อยู่ กำลังเริ่มเกมเป่ายิ้งฉุบ" : "เกิดข้อผิดพลาด"); const err = new Error(msg); err.payload = data.message; throw err; }
     return data;
   }
 
@@ -18,7 +18,8 @@ const App = (() => {
   }
 
   function go(id) {
-    const protectedPages = ["home","menu","reservation","customer","admin","staff","tables","pos"];
+    const protectedPages = ["home","menu","reservation","customer","table-select","cart","admin","staff","tables","pos"];
+    if (state.user?.role === "customer" && !selectedTable() && ["menu","cart","customer"].includes(id)) id = "table-select";
     if (protectedPages.includes(id) && !state.user) {
       document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
       $("login")?.classList.add("active");
@@ -37,8 +38,11 @@ const App = (() => {
     if (state.user?.role === "staff" && ["home","menu","reservation","customer"].includes(id)) id = "staff";
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     $(id)?.classList.add("active");
+    if (id === "home") loadRecommendedMenus();
+    if (id === "table-select") { loadCustomerTables(); const back=$("table-back"); if(back) back.classList.toggle("hidden", !!selectedTable()); }
     if (id === "menu") loadMenus();
-    if (id === "reservation") loadReservations();
+    if (id === "cart") { renderCart(); }
+    if (id === "reservation") { setReservationMinimum(); loadReservations(); }
     if (id === "customer") loadCustomer();
     if (id === "admin") loadDashboard();
     if (state.polling) { clearInterval(state.polling); state.polling = null; }
@@ -62,9 +66,9 @@ const App = (() => {
       const body = {email:$("auth-email").value, password:$("auth-password").value};
       if (mode === "register") body.name = $("auth-name").value;
       const data = await api(`/api/auth/${mode === "login" ? "login" : "register"}`, {method:"POST",body:JSON.stringify(body)});
-      state.token = data.token; state.user = data.user; localStorage.setItem("itailaew_token", state.token);
+      state.token = data.token; state.user = data.user; localStorage.setItem("itailaew_token", state.token); validateSelectedTableForUser();
       refreshNav(); toast(data.message);
-      if (state.user.role === "admin") go("admin"); else if (state.user.role === "staff") go("staff"); else go("customer");
+      if (state.user.role === "admin") go("admin"); else if (state.user.role === "staff") go("staff"); else go("home");
     } catch(e) { toast(e.message); }
   }
 
@@ -75,13 +79,24 @@ const App = (() => {
     $("logout-nav").classList.toggle("hidden", !loggedIn);
     document.querySelectorAll("#main-nav button[data-roles]").forEach(b => {
       const roles = b.dataset.roles.split(",");
-      b.classList.toggle("hidden", !(loggedIn && roles.includes(state.user.role)));
+      const roleVisible = loggedIn && roles.includes(state.user.role);
+      const tableVisible = !b.hasAttribute("data-requires-table") || !!selectedTable();
+      b.classList.toggle("hidden", !(roleVisible && tableVisible));
+    });
+    const isCustomer = loggedIn && state.user.role === "customer";
+    const reservationNav = $("reservation-nav");
+    if (reservationNav) reservationNav.classList.add("hidden");
+    const tableNav = $("table-nav");
+    if (tableNav) tableNav.classList.add("hidden");
+    ["menu-nav","cart-nav","bill-nav"].forEach(id => {
+      const button = $(id);
+      if (button) button.classList.toggle("hidden", !(isCustomer && !!selectedTable()));
     });
   }
 
   function logout() {
     if (state.polling) { clearInterval(state.polling); state.polling = null; }
-    state.user = null; state.token = null; localStorage.removeItem("itailaew_token");
+    state.user = null; state.token = null; localStorage.removeItem("itailaew_token"); clearSelectedTable(); state.cart = {}; localStorage.removeItem("itailaew_cart");
     refreshNav();
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     $("login")?.classList.add("active");
@@ -104,6 +119,7 @@ const App = (() => {
     try {
       const data = await api("/api/me");
       state.user = data.user;
+      validateSelectedTableForUser();
       refreshNav();
       const target = state.user.role === "admin" ? "admin" : state.user.role === "staff" ? "staff" : "home";
       document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
@@ -121,29 +137,66 @@ const App = (() => {
       const q = encodeURIComponent($("menu-search")?.value || "");
       const sort = $("menu-sort")?.value || "name";
       const data = await api(`/api/menus?q=${q}&sort=${sort}&page=${page}&page_size=8`);
+      state.menus = data.items;
       const grid = $("menu-grid");
       grid.innerHTML = data.items.map(m => `<article class="menu-card"><div class="menu-image">${m.image_url ? `<img src="${escapeHtml(m.image_url)}" style="width:100%;height:100%;object-fit:cover">` : (m.category==="Pizza"?"🍕":m.category==="Dessert"?"🍰":"🍝")}</div><div class="menu-body"><h3>${escapeHtml(m.name)}</h3><p>${escapeHtml(m.category)}${m.is_out_of_stock ? ' <span class="sold">หมด</span>':''}</p><span class="price">฿${Number(m.price).toFixed(2)}</span>${state.user?.role !== "admin" ? `<button class="secondary" style="float:right;padding:7px 12px" ${m.is_out_of_stock?"disabled":""} onclick="App.quickOrder('${m.id}')">+</button>`:""}</div></article>`).join("") || `<div class="list-card">ยังไม่มีเมนู</div>`;
       $("menu-pages").innerHTML = Array.from({length:data.total_pages},(_,i)=>`<button onclick="App.loadMenus(${i+1})">${i+1}</button>`).join("");
     } catch(e) { $("menu-grid").innerHTML = `<div class="list-card">${escapeHtml(e.message)}</div>`; }
   }
 
-  async function quickOrder(menuId) {
-    if (!state.user) return go("login");
-    if (state.user.role !== "customer") return toast("ฟังก์ชันนี้สำหรับ Customer");
-    if (!state.qrTable) return toast("กรุณาเข้าหน้าเมนูผ่าน QR ของโต๊ะ");
-    try {
-      const data = await api("/api/customer/orders", {method:"POST", body:JSON.stringify({
-        table_id: `table_${String(state.qrTable).padStart(2,"0")}`,
-        items: [{menu_id: menuId, quantity: 1, options: {}}]
-      })});
-      toast(`ส่งออเดอร์โต๊ะ ${state.qrTable} เข้าครัวแล้ว`);
-      go("customer");
-    } catch(e) { toast(e.message); }
+  async function loadRecommendedMenus(){
+    const grid=$("recommended-menu-grid"); if(!grid)return;
+    try{const data=await api("/api/recommended-menus");grid.innerHTML=data.items.map(m=>`<article class="menu-card"><div class="menu-image">${m.image_url?`<img src="${escapeHtml(m.image_url)}" style="width:100%;height:100%;object-fit:cover">`:(m.category==="Pizza"?"🍕":m.category==="Dessert"?"🍰":"🍝")}</div><div class="menu-body"><h3>${escapeHtml(m.name)}</h3><p>${escapeHtml(m.category)} · สั่งแล้ว ${Number(m.ordered_count)} ครั้ง</p><span class="price">฿${Number(m.price).toFixed(2)}</span></div></article>`).join("")||`<div class="list-card">ยังไม่มีข้อมูลเมนูยอดนิยม</div>`}catch(e){grid.innerHTML=`<div class="list-card">${escapeHtml(e.message)}</div>`}
   }
 
+  function persistCart(){ localStorage.setItem("itailaew_cart", JSON.stringify(state.cart)); }
+  function selectedTable(){ return state.selectedTable; }
+  function clearSelectedTable(){ state.selectedTable=null; localStorage.removeItem("itailaew_selected_table"); refreshNav(); }
+  function validateSelectedTableForUser(){ if(state.user?.role === "customer" && state.selectedTable && state.selectedTable.claimed_by && state.selectedTable.claimed_by !== state.user.id) clearSelectedTable(); }
+  async function quickOrder(menuId){
+    if(!state.user) return go("login"); if(state.user.role!=="customer") return toast("ฟังก์ชันนี้สำหรับ Customer"); if(!selectedTable()) return go("table-select");
+    const menu=state.menus.find(x=>x.id===menuId); if(!menu)return;
+    const optionFields=Object.entries(menu.options||{}).map(([key,values])=>`<label>${escapeHtml(key)}<select id="opt-${escapeAttr(key)}">${(Array.isArray(values)?values:[]).map(v=>{const name=typeof v==="object"?v.name:v;const price=typeof v==="object"?Number(v.price||0):0;return `<option value="${escapeAttr(name)}">${escapeHtml(name)}${price?` (+฿${price.toFixed(2)})`:""}</option>`}).join("")}</select></label>`).join("");
+    openModal(`<h2>${escapeHtml(menu.name)}</h2><p class="small">เลือกรายละเอียดอาหารก่อนเพิ่มลงตะกร้า</p>${optionFields}<label>หมายเหตุเพิ่มเติม<textarea id="menu-note" rows="3" placeholder="เช่น ไม่ใส่ผัก"></textarea></label><div class="actions"><button class="primary" onclick="App.addConfiguredToCart('${menuId}')">เพิ่มลงตะกร้า</button><button class="secondary" onclick="App.closeModal()">ยกเลิก</button></div>`);
+  }
+  function addConfiguredToCart(menuId){
+    const menu=state.menus.find(x=>x.id===menuId); const options={};
+    Object.keys(menu.options||{}).forEach(k=>{const input=$("opt-"+k); if(input)options[k]=input.value}); const note=$("menu-note")?.value?.trim()||""; if(note)options.note=note;
+    let unitPrice=Number(menu.price||0); Object.entries(options).forEach(([group,value])=>{const def=(menu.options?.[group]||[]).find(v=>String(typeof v==="object"?v.name:v)===String(value)); if(def&&typeof def==="object") unitPrice+=Number(def.price||0)});
+    const key=menuId+"|"+JSON.stringify(options); const old=state.cart[key]; state.cart[key]={menu_id:menuId,quantity:(old?.quantity||0)+1,options,name:menu.name,unit_price:unitPrice}; persistCart(); renderCart(); closeModal(); toast("เพิ่มลงตะกร้าแล้ว");
+  }
+  function renderCart(){
+    const rows=Object.entries(state.cart); let subtotal=0;
+    $("cart-items").innerHTML=rows.map(([key,it])=>{subtotal+=Number(it.unit_price)*it.quantity;return `<div class="table-row"><div><b>${escapeHtml(it.name)}</b><div class="small">${Object.entries(it.options||{}).map(([k,v])=>`${escapeHtml(k)}: ${escapeHtml(v)}`).join(" · ")} · ฿${(Number(it.unit_price)*it.quantity).toFixed(2)}</div></div><div class="qty"><button onclick="App.cartAdd('${escapeAttr(key)}',-1)">−</button><b>${it.quantity}</b><button onclick="App.cartAdd('${escapeAttr(key)}',1)">+</button></div></div>`}).join("") || `<p class="small">ยังไม่มีรายการในตะกร้า</p>`;
+    $("cart-subtotal").textContent=`฿${subtotal.toFixed(2)}`; $("cart-table").textContent=selectedTable()?.table_number||"ยังไม่ได้เลือกโต๊ะ";
+  }
+  function cartAdd(key,delta){if(!state.cart[key])return;state.cart[key].quantity+=delta;if(state.cart[key].quantity<=0)delete state.cart[key];persistCart();renderCart()}
+  function clearCart(){state.cart={};persistCart();renderCart()}
+  async function submitCart(){
+    if(!selectedTable()) return toast("กรุณาเลือกโต๊ะก่อน"); const items=Object.values(state.cart).map(x=>({menu_id:x.menu_id,quantity:x.quantity,options:x.options||{}})); if(!items.length)return toast("กรุณาเพิ่มอาหารลงตะกร้า");
+    try{await api("/api/customer/orders",{method:"POST",body:JSON.stringify({table_id:selectedTable().id,items})});clearCart();toast("ส่งออเดอร์เข้าครัวแล้ว");go("customer")}catch(e){toast(e.message)}
+  }
+  async function loadCustomerTables(){
+    try{const d=await api("/api/customer/tables");$("customer-tables").innerHTML=d.tables.map(t=>{const unavailable=t.status!=="available";return `<div class="table-card"><div class="top"><h3>โต๊ะ ${escapeHtml(t.table_number)}</h3><span class="badge ${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></div><div class="info">${unavailable?"โต๊ะนี้กำลังใช้งาน":"โต๊ะว่างพร้อมให้เลือก"}</div><button class="primary full" ${unavailable?"":""} onclick="App.claimTable('${t.id}')">${unavailable?"ขอเล่นเป่ายิ้งฉุบ":"เลือกโต๊ะนี้"}</button></div>`}).join("")}catch(e){toast(e.message)}
+  }
+  async function claimTable(id){
+    try{const d=await api("/api/customer/tables/claim",{method:"POST",body:JSON.stringify({table_id:id})});state.selectedTable=d.table;localStorage.setItem("itailaew_selected_table",JSON.stringify(state.selectedTable));refreshNav();toast(`เลือกโต๊ะ ${d.table.table_number} แล้ว`);go("menu")}
+    catch(e){if(e.payload?.code==="TABLE_GAME") return openGame(e.payload.game);toast(e.message)}
+  }
+  function openGame(game){
+    const labels={rock:"ค้อน",paper:"กระดาษ",scissors:"กรรไกร"};
+    openModal(`<h2>โต๊ะ ${escapeHtml(game.table_number)} ถูกเลือกพร้อมกัน</h2><p>เล่นเป่ายิ้งฉุบจากอุปกรณ์ของคุณ ระบบจะเริ่มรอบใหม่ทันทีหากเสมอ</p><div class="actions"><button class="primary" onclick="App.gameChoice('${game.id}','rock')">ค้อน</button><button class="primary" onclick="App.gameChoice('${game.id}','paper')">กระดาษ</button><button class="primary" onclick="App.gameChoice('${game.id}','scissors')">กรรไกร</button></div><p id="game-status" class="small">เลือกตัวเลือกของคุณ</p>`);
+    clearInterval(state.gameTimer);state.gameTimer=setInterval(()=>App.refreshGame(game.id),1200);state.activeGame=game;
+  }
+  async function gameChoice(id,choice){try{const d=await api(`/api/customer/table-games/${id}/choice`,{method:"POST",body:JSON.stringify({choice})});showGameResult(d.game)}catch(e){toast(e.message)}}
+  async function refreshGame(id){try{const d=await api(`/api/customer/table-games/${id}`);showGameResult(d.game)}catch(e){}}
+  function showGameResult(game){const el=$("game-status");if(!el)return;if(game.result==="tie"){el.textContent=`เสมอ รอบที่ ${game.round} — เลือกใหม่ได้เลย`;return}if(game.status==="finished"){clearInterval(state.gameTimer);const won=game.winner===state.user.id;el.innerHTML=won?"คุณชนะ ได้โต๊ะนี้":"คุณแพ้ กรุณาปิดหน้าต่างและเลือกโต๊ะอื่น";if(won){state.selectedTable={id:game.table_id,table_number:game.table_number,status:"occupied",claimed_by:state.user.id};localStorage.setItem("itailaew_selected_table",JSON.stringify(state.selectedTable));refreshNav();setTimeout(()=>{closeModal();go("menu")},1000)}}}
+  function reservationMinimumValue(){ const d=new Date(Date.now()+30*60*1000); const pad=n=>String(n).padStart(2,"0"); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  function setReservationMinimum(){ const input=$("res-date"); if(input){input.min=reservationMinimumValue(); input.title="ต้องจองล่วงหน้าอย่างน้อย 30 นาที";} }
   async function reserve(event) {
     event.preventDefault();
     if (!state.user) return go("login");
+    if ($("res-date")?.value) { const [h,m]=$("res-date").value.split(":").map(Number); const selected=new Date(); selected.setHours(h,m,0,0); if(selected.getTime() < Date.now()+30*60*1000) return toast("กรุณาจองล่วงหน้าอย่างน้อย 30 นาที"); }
     try {
       const data = await api("/api/reservations",{method:"POST",body:JSON.stringify({
         customer_name:$("res-name").value, phone:$("res-phone").value,
@@ -153,7 +206,7 @@ const App = (() => {
     } catch(e) { toast(e.message); }
   }
 
-  const RES_LABEL = {waiting: "รอยืนยัน", confirmed: "ยืนยันแล้ว", seated: "นั่งแล้ว", cancelled: "ยกเลิก"};
+  const RES_LABEL = {waiting: "รอยืนยัน", confirmed: "ยืนยันแล้ว", seated: "นั่งแล้ว", cancelled: "ยกเลิก", expired: "หมดสิทธิ์"};
   function resLabel(k) { return RES_LABEL[k] || k; }
   function resBadge(status) { return `<span class="badge res-${escapeHtml(status)}">${escapeHtml(resLabel(status))}</span>`; }
 
@@ -162,20 +215,19 @@ const App = (() => {
     try {
       const data = await api("/api/reservations");
       const list = data.reservations.slice().sort((a, b) => String(b.datetime).localeCompare(String(a.datetime)));
-      $("my-reservations").innerHTML = list.map(r=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(r.table_number)}</b><div class="small">${escapeHtml(String(r.datetime).replace("T"," "))} · ${escapeHtml(r.customer_name)}</div></div>${resBadge(r.status)}</div>`).join("") || `<p class="small">ยังไม่มีรายการ</p>`;
+      $("my-reservations").innerHTML = list.map(r=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(r.table_number)}</b><div class="small">${escapeHtml(String(r.datetime).replace(/^.*T/, "").slice(0,5))} · ${escapeHtml(r.customer_name)}</div></div>${resBadge(r.status)}</div>`).join("") || `<p class="small">ยังไม่มีรายการ</p>`;
     } catch(e) { toast(e.message); }
   }
 
-  async function loadCustomer() {
-    if (!state.user) return;
-    $("customer-name").textContent = state.user.name;
-    $("customer-points").textContent = state.user.member_points || 0;
-    try {
-      const data = await api("/api/orders");
-      $("customer-orders").innerHTML = `<h3>My Orders</h3>` + (data.orders.map(o=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(o.table_number||"-")}</b><div class="small">${escapeHtml(o.created_at||"")}</div></div><span class="badge">${escapeHtml(o.status)}</span></div>`).join("") || `<p class="small">ยังไม่มีออเดอร์</p>`);
-    } catch(e) {}
+  async function loadCustomer(){
+    if(!state.user)return; $("customer-name").textContent=state.user.name; $("customer-points").textContent=state.user.member_points||0; renderCart();
+    try{const d=await api("/api/orders");$("customer-orders").innerHTML=`<h3>ออเดอร์ของฉัน</h3>`+(d.orders.map(o=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(o.table_number||"-")}</b><div class="small">${escapeHtml(o.created_at||"")} · ยอด ฿${Number(o.total||0).toFixed(2)}</div></div><span class="badge">${escapeHtml(o.status)}</span></div>`).join("")||`<p class="small">ยังไม่มีออเดอร์</p>`)}catch(e){}
   }
-
+  async function requestBill(){
+    const o=(await api("/api/orders")).orders.find(x=>x.status!=="closed"&&x.status!=="merged"); if(!o)return toast("ยังไม่มีบิลที่เปิดอยู่");
+    try{const b=await api(`/api/orders/${o.id}/bill?discount=0`);openModal(`<h2>ยอดบิล โต๊ะ ${escapeHtml(o.table_number||"")}</h2>${billRows(b.bill)}<p class="small">กดแล้วระบบจะแจ้งพนักงานให้มาเช็คบิล</p><div class="actions"><button class="primary" onclick="App.callStaff('${o.id}')">เรียกพนักงานเช็คบิล</button><button class="secondary" onclick="App.closeModal()">ปิด</button></div>`)}catch(e){toast(e.message)}
+  }
+  async function callStaff(id){try{await api(`/api/orders/${id}/request-checkout`,{method:"PATCH",body:"{}"});closeModal();toast("เรียกพนักงานเช็คบิลแล้ว");loadCustomer()}catch(e){toast(e.message)}}
   function summaryRows(rows, total) {
     return rows.map(([label, n]) => `<div style="margin:12px 0"><div class="table-row" style="border:0;padding:0"><span>${escapeHtml(label)}</span><b>${n}</b></div><div class="meter"><i style="width:${total ? Math.round(n / total * 100) : 0}%"></i></div></div>`).join("") || `<p class="small">ยังไม่มีข้อมูล</p>`;
   }
@@ -229,7 +281,7 @@ const App = (() => {
       if (!staffState.tables.length) staffState.tables = (await api("/api/tables")).tables;
     } catch(e) { return toast(e.message); }
     const tables = staffState.tables.slice().sort((a, b) => String(a.table_number).localeCompare(String(b.table_number), undefined, {numeric: true}));
-    openModal(`<h2>จองโต๊ะให้ลูกค้า</h2><form onsubmit="App.saveStaffReserve(event)"><label>ชื่อลูกค้า<input id="sr-name" required></label><label>เบอร์โทร<input id="sr-phone" required></label><label>โต๊ะ<select id="sr-table">${tables.map(t => `<option value="${escapeAttr(t.table_number)}">โต๊ะ ${escapeHtml(t.table_number)}</option>`).join("")}</select></label><label>วันและเวลา<input id="sr-date" type="datetime-local" required></label><div class="actions"><button class="primary">บันทึกการจอง</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form>`);
+    openModal(`<h2>จองโต๊ะให้ลูกค้า</h2><form onsubmit="App.saveStaffReserve(event)"><label>ชื่อลูกค้า<input id="sr-name" required></label><label>เบอร์โทร<input id="sr-phone" required></label><label>โต๊ะ<select id="sr-table">${tables.map(t => `<option value="${escapeAttr(t.table_number)}">โต๊ะ ${escapeHtml(t.table_number)}</option>`).join("")}</select></label><label>เวลา<input id="sr-date" type="time" required></label><div class="actions"><button class="primary">บันทึกการจอง</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form>`);
   }
 
   async function saveStaffReserve(e) {
@@ -242,51 +294,18 @@ const App = (() => {
 
   // ---------- Staff: Counter order (order on behalf of the customer) ----------
   const pos = { menus: [], cart: {}, tables: [] };
-
-  async function loadPos() {
-    try {
-      const [m, t] = await Promise.all([api("/api/menus?page=1&page_size=100"), api("/api/tables")]);
-      pos.menus = m.items;
-      pos.tables = t.tables.slice().sort((a, b) => String(a.table_number).localeCompare(String(b.table_number), undefined, {numeric: true}));
-      const sel = $("pos-table"), keep = sel.value;
-      sel.innerHTML = pos.tables.map(x => `<option value="${escapeAttr(x.id)}" ${x.status === "reserved" ? "disabled" : ""}>โต๊ะ ${escapeHtml(x.table_number)} (${escapeHtml(x.status)})</option>`).join("");
-      if (keep && pos.tables.some(x => x.id === keep && x.status !== "reserved")) sel.value = keep;
-      renderPos();
-    } catch(e) { toast(e.message); }
+  async function loadPos(){
+    try{const [m,t]=await Promise.all([api("/api/menus?page=1&page_size=100"),api("/api/tables")]);pos.menus=m.items;pos.tables=t.tables.slice().sort((a,b)=>String(a.table_number).localeCompare(String(b.table_number),undefined,{numeric:true}));const sel=$("pos-table"),keep=sel.value;sel.innerHTML=pos.tables.map(x=>`<option value="${escapeAttr(x.id)}" ${x.status==="reserved"?"disabled":""}>โต๊ะ ${escapeHtml(x.table_number)} (${escapeHtml(x.status)})</option>`).join("");if(keep&&pos.tables.some(x=>x.id===keep&&x.status!=="reserved"))sel.value=keep;renderPos()}catch(e){toast(e.message)}
   }
-
-  function renderPos() {
-    const q = ($("pos-search").value || "").trim().toLowerCase();
-    $("pos-menu").innerHTML = pos.menus.filter(m => !q || String(m.name).toLowerCase().includes(q) || String(m.category).toLowerCase().includes(q))
-      .map(m => `<div class="pos-item"><div><b>${escapeHtml(m.name)}</b><span class="small">${escapeHtml(m.category)} · ฿${Number(m.price).toFixed(2)}${m.is_out_of_stock ? " · หมด" : ""}</span></div><button class="secondary" ${m.is_out_of_stock ? "disabled" : ""} onclick="App.posAdd('${m.id}',1)">+</button></div>`).join("") || `<p class="small">ไม่พบเมนู</p>`;
-    const ids = Object.keys(pos.cart);
-    let total = 0;
-    $("pos-cart").innerHTML = ids.map(id => {
-      const m = pos.menus.find(x => x.id === id); if (!m) return "";
-      const qty = pos.cart[id]; total += Number(m.price) * qty;
-      return `<div class="table-row"><div><b>${escapeHtml(m.name)}</b><div class="small">฿${(Number(m.price) * qty).toFixed(2)}</div></div><div class="qty"><button onclick="App.posAdd('${id}',-1)">−</button><b>${qty}</b><button onclick="App.posAdd('${id}',1)">+</button></div></div>`;
-    }).join("") || `<p class="small">ยังไม่ได้เลือกเมนู</p>`;
-    $("pos-total").textContent = `฿${total.toFixed(2)}`;
+  function renderPos(){
+    const q=$("pos-search").value.trim().toLowerCase();$("pos-menu").innerHTML=pos.menus.filter(m=>!q||String(m.name).toLowerCase().includes(q)||String(m.category).toLowerCase().includes(q)).map(m=>`<div class="pos-item"><div><b>${escapeHtml(m.name)}</b><span class="small">${escapeHtml(m.category)} · ฿${Number(m.price).toFixed(2)}${m.is_out_of_stock?" · หมด":""}</span></div><button class="secondary" ${m.is_out_of_stock?"disabled":""} onclick="App.posChoose('${m.id}')">+</button></div>`).join("")||`<p class="small">ไม่พบเมนู</p>`;
+    const ids=Object.keys(pos.cart);let total=0;$("pos-cart").innerHTML=ids.map(key=>{const it=pos.cart[key];total+=Number(it.unit_price)*it.quantity;return `<div class="table-row"><div><b>${escapeHtml(it.name)}</b><div class="small">${Object.entries(it.options||{}).map(([k,v])=>`${escapeHtml(k)}: ${escapeHtml(v)}`).join(" · ")} · ฿${(Number(it.unit_price)*it.quantity).toFixed(2)}</div></div><div class="qty"><button onclick="App.posAdd('${escapeAttr(key)}',-1)">−</button><b>${it.quantity}</b><button onclick="App.posAdd('${escapeAttr(key)}',1)">+</button></div></div>`}).join("")||`<p class="small">ยังไม่ได้เลือกเมนู</p>`;$("pos-total").textContent=`฿${total.toFixed(2)}`;
   }
-
-  function posAdd(id, delta) {
-    const next = (pos.cart[id] || 0) + delta;
-    if (next <= 0) delete pos.cart[id]; else pos.cart[id] = next;
-    renderPos();
-  }
-  function posClear() { pos.cart = {}; renderPos(); }
-
-  async function posSubmit() {
-    const items = Object.entries(pos.cart).map(([menu_id, quantity]) => ({menu_id, quantity, options: {}}));
-    if (!items.length) return toast("กรุณาเลือกเมนูก่อน");
-    const table_id = $("pos-table").value;
-    if (!table_id) return toast("กรุณาเลือกโต๊ะ");
-    try {
-      await api("/api/orders", {method: "POST", body: JSON.stringify({table_id, items})});
-      toast("ส่งออเดอร์เข้าครัวแล้ว"); pos.cart = {}; loadPos();
-    } catch(e) { toast(e.message); }
-  }
-
+  function posChoose(menuId){const menu=pos.menus.find(x=>x.id===menuId);if(!menu)return;const fields=Object.entries(menu.options||{}).map(([key,values])=>`<label>${escapeHtml(key)}<select id="pos-opt-${escapeAttr(key)}">${(Array.isArray(values)?values:[]).map(v=>{const name=typeof v==="object"?v.name:v,price=typeof v==="object"?Number(v.price||0):0;return `<option value="${escapeAttr(name)}">${escapeHtml(name)}${price?` (+฿${price.toFixed(2)})`:""}</option>`}).join("")}</select></label>`).join("");openModal(`<h2>${escapeHtml(menu.name)}</h2>${fields}<label>หมายเหตุเพิ่มเติม<textarea id="pos-note" rows="3"></textarea></label><div class="actions"><button class="primary" onclick="App.posAddConfigured('${menuId}')">เพิ่มรายการ</button><button class="secondary" onclick="App.closeModal()">ยกเลิก</button></div>`)}
+  function posAddConfigured(menuId){const menu=pos.menus.find(x=>x.id===menuId),options={};Object.keys(menu.options||{}).forEach(k=>{const input=$("pos-opt-"+k);if(input)options[k]=input.value});const note=$("pos-note")?.value.trim();if(note)options.note=note;let unitPrice=Number(menu.price||0);Object.entries(options).forEach(([g,v])=>{const d=(menu.options?.[g]||[]).find(x=>String(typeof x==="object"?x.name:x)===String(v));if(d&&typeof d==="object")unitPrice+=Number(d.price||0)});const key=menuId+"|"+JSON.stringify(options),old=pos.cart[key];pos.cart[key]={menu_id:menuId,quantity:(old?.quantity||0)+1,options,name:menu.name,unit_price:unitPrice};closeModal();renderPos()}
+  function posAdd(key,delta){if(!pos.cart[key])return;pos.cart[key].quantity+=delta;if(pos.cart[key].quantity<=0)delete pos.cart[key];renderPos()}
+  function posClear(){pos.cart={};renderPos()}
+  async function posSubmit(){const items=Object.values(pos.cart).map(x=>({menu_id:x.menu_id,quantity:x.quantity,options:x.options||{}}));if(!items.length)return toast("กรุณาเลือกเมนูก่อน");const table_id=$("pos-table").value;if(!table_id)return toast("กรุณาเลือกโต๊ะ");try{await api("/api/orders",{method:"POST",body:JSON.stringify({table_id,items})});toast("ส่งออเดอร์เข้าครัวแล้ว");pos.cart={};loadPos()}catch(e){toast(e.message)}}
   // ---------- Staff: checkout & receipt ----------
   let billTimer = null;
 
@@ -450,12 +469,17 @@ const App = (() => {
     }
   }
 
+  function optionRows(options){
+    return Object.entries(options||{}).map(([group,values])=>`<div class="option-group" data-group="${escapeAttr(group)}"><div class="table-row"><input class="option-group-name" value="${escapeAttr(group)}" placeholder="ชื่อกลุ่ม เช่น ขนาด"><button type="button" class="secondary" onclick="this.closest('.option-group').remove()">ลบกลุ่ม</button></div><div class="option-values">${(Array.isArray(values)?values:[]).map(v=>{const name=typeof v==="object"?v.name:v;const price=typeof v==="object"?v.price:0;return `<div class="option-value"><input class="option-value-name" value="${escapeAttr(name)}" placeholder="ค่าตัวเลือก"><input class="option-value-price" type="number" min="0" step="0.01" value="${Number(price||0)}" placeholder="ราคาเพิ่ม"><button type="button" class="secondary" onclick="this.parentElement.remove()">ลบ</button></div>`}).join("")}</div><button type="button" class="secondary" onclick="App.addOptionValue(this)">+ เพิ่มค่าตัวเลือก</button></div>`).join("");
+  }
   function showMenuForm(menu={}) {
     $("modal").classList.remove("hidden");
-    $("modal").innerHTML=`<div><h2>${menu.id?"Edit":"Add"} Menu</h2><form onsubmit="App.saveMenu(event,'${menu.id||""}')"><label>ชื่อเมนู<input id="mf-name" value="${escapeAttr(menu.name||"")}" required></label><label>หมวดหมู่<input id="mf-category" value="${escapeAttr(menu.category||"Pasta")}" required></label><label>ราคา<input id="mf-price" type="number" min="0" step="0.01" value="${menu.price||""}" required></label><label>Image URL<input id="mf-image" value="${escapeAttr(menu.image_url||"")}" placeholder="https://..."></label><label><input id="mf-stock" type="checkbox" ${menu.is_out_of_stock?"checked":""}> สินค้าหมด</label><div class="actions"><button class="primary">Save</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form></div>`;
+    $("modal").innerHTML=`<div><h2>${menu.id?"Edit":"Add"} Menu</h2><form onsubmit="App.saveMenu(event,'${menu.id||""}')"><label>ชื่อเมนู<input id="mf-name" value="${escapeAttr(menu.name||"")}" required></label><label>หมวดหมู่<input id="mf-category" value="${escapeAttr(menu.category||"Pasta")}" required></label><label>ราคาเมนูหลัก<input id="mf-price" type="number" min="0" step="0.01" value="${menu.price||""}" required></label><label>Image URL<input id="mf-image" value="${escapeAttr(menu.image_url||"")}" placeholder="https://..."></label><label><input id="mf-stock" type="checkbox" ${menu.is_out_of_stock?"checked":""}> สินค้าหมด</label><h3>ตัวเลือกพิเศษและราคาเพิ่ม</h3><div id="menu-options">${optionRows(menu.options)}</div><button type="button" class="secondary" onclick="App.addOptionGroup()">+ เพิ่มกลุ่มตัวเลือก</button><div class="actions"><button class="primary">Save</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form></div>`;
   }
-
-  async function saveMenu(e,id){e.preventDefault();try{const body={name:$("mf-name").value,category:$("mf-category").value,price:$("mf-price").value,image_url:$("mf-image").value,is_out_of_stock:$("mf-stock").checked};await api(id?`/api/menus/${id}`:"/api/menus",{method:id?"PATCH":"POST",body:JSON.stringify(body)});closeModal();toast("บันทึกเมนูสำเร็จ");adminPage("menus")}catch(x){toast(x.message)}}
+  function addOptionGroup(){const box=$("menu-options");box.insertAdjacentHTML("beforeend",`<div class="option-group"><div class="table-row"><input class="option-group-name" placeholder="ชื่อกลุ่ม เช่น ขนาด"><button type="button" class="secondary" onclick="this.closest('.option-group').remove()">ลบกลุ่ม</button></div><div class="option-values"></div><button type="button" class="secondary" onclick="App.addOptionValue(this)">+ เพิ่มค่าตัวเลือก</button></div>`)}
+  function addOptionValue(button){button.previousElementSibling.insertAdjacentHTML("beforeend",`<div class="option-value"><input class="option-value-name" placeholder="ค่าตัวเลือก" required><input class="option-value-price" type="number" min="0" step="0.01" value="0" placeholder="ราคาเพิ่ม"><button type="button" class="secondary" onclick="this.parentElement.remove()">ลบ</button></div>`)}
+  function readMenuOptions(){const options={};document.querySelectorAll("#menu-options .option-group").forEach(group=>{const name=group.querySelector(".option-group-name")?.value.trim();if(!name)return;options[name]=[...group.querySelectorAll(".option-value")].map(row=>({name:row.querySelector(".option-value-name")?.value.trim(),price:row.querySelector(".option-value-price")?.value||0})).filter(v=>v.name)});return options}
+  async function saveMenu(e,id){e.preventDefault();try{const body={name:$("mf-name").value,category:$("mf-category").value,price:$("mf-price").value,image_url:$("mf-image").value,is_out_of_stock:$("mf-stock").checked,options:readMenuOptions()};await api(id?`/api/menus/${id}`:"/api/menus",{method:id?"PATCH":"POST",body:JSON.stringify(body)});closeModal();toast("บันทึกเมนูสำเร็จ");adminPage("menus")}catch(x){toast(x.message)}}
   async function deleteMenu(id){if(!confirm("ลบเมนูนี้หรือไม่?"))return;try{await api(`/api/menus/${id}`,{method:"DELETE"});toast("ลบเมนูสำเร็จ");adminPage("menus")}catch(e){toast(e.message)}}
   function showStaffForm(){$("modal").classList.remove("hidden");$("modal").innerHTML=`<div><h2>Add Staff</h2><form onsubmit="App.saveStaff(event)"><label>ชื่อ<input id="sf-name" required></label><label>Email<input id="sf-email" type="email" required></label><label>Password<input id="sf-pass" type="password" minlength="6" required></label><div class="actions"><button class="primary">Create Staff</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form></div>`}
   async function saveStaff(e){e.preventDefault();try{await api("/api/users/staff",{method:"POST",body:JSON.stringify({name:$("sf-name").value,email:$("sf-email").value,password:$("sf-pass").value})});closeModal();toast("เพิ่ม Staff สำเร็จ");adminPage("users")}catch(x){toast(x.message)}}
@@ -465,5 +489,5 @@ const App = (() => {
   function escapeAttr(v){return escapeHtml(v)}
 
   restore();
-  return {go,authMode,submitAuth,logout,loadMenus,reserve,loadReservations,loadCustomer,loadDashboard,loadStaff,loadTables,showCheckout,previewBill,doCheckout,resAction,showStaffReserve,saveStaffReserve,loadPos,renderPos,posAdd,posClear,posSubmit,setTableStatus,showMove,doMove,showMerge,doMerge,showSplit,doSplit,updateKitchen,adminPage,showMenuForm,saveMenu,deleteMenu,showStaffForm,saveStaff,toggleUser,closeModal,quickOrder};
+  return {go,authMode,submitAuth,logout,loadMenus,reserve,loadReservations,loadCustomer,loadDashboard,cartAdd,clearCart,submitCart,requestBill,callStaff,loadCustomerTables,claimTable,gameChoice,refreshGame,addConfiguredToCart,loadStaff,loadTables,showCheckout,previewBill,doCheckout,resAction,showStaffReserve,saveStaffReserve,loadPos,renderPos,posChoose,posAddConfigured,posAdd,posClear,posSubmit,setTableStatus,showMove,doMove,showMerge,doMerge,showSplit,doSplit,updateKitchen,adminPage,showMenuForm,addOptionGroup,addOptionValue,saveMenu,deleteMenu,showStaffForm,saveStaff,toggleUser,closeModal,quickOrder};
 })();

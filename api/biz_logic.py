@@ -113,14 +113,22 @@ def normalize_options(options):
     if not isinstance(options, dict):
         raise ValueError("ตัวเลือกเมนูต้องเป็นข้อมูลแบบ object")
     normalized = {}
-    keys = list(options.keys())
-    index = 0
-    while index < len(keys):
-        key = str(keys[index]).strip()
-        value = options[keys[index]]
-        if key:
-            normalized[key] = value
-        index += 1
+    for raw_key, raw_values in options.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        if not isinstance(raw_values, list):
+            raise ValueError(f"ตัวเลือก {key} ต้องเป็นรายการ")
+        values = []
+        for raw_value in raw_values:
+            if isinstance(raw_value, dict):
+                name = clean_text(raw_value.get("name"), "ค่าตัวเลือก", 100)
+                price = to_positive_number(raw_value.get("price", 0), "ราคาตัวเลือก", allow_zero=True)
+            else:
+                name = clean_text(raw_value, "ค่าตัวเลือก", 100)
+                price = 0.0
+            values.append({"name": name, "price": round(price, 2)})
+        normalized[key] = values
     return normalized
 
 def validate_menu_payload(data):
@@ -140,12 +148,19 @@ ACTIVE_RESERVATION_STATUSES = {"waiting", "confirmed", "seated"}
 
 
 def parse_reservation_dt(value):
-    """Parse the datetime-local string sent by the browser (e.g. 2026-10-03T19:00)."""
+    """Parse today's reservation time in 24-hour or common 12-hour formats."""
+    text = str(value).strip() if value is not None else ""
     try:
-        return datetime.fromisoformat(str(value).strip())
+        return datetime.fromisoformat(text)
     except (ValueError, TypeError):
-        raise ValueError("รูปแบบวันและเวลาไม่ถูกต้อง")
-
+        pass
+    normalized = " ".join(text.replace(".", ":").split()).upper()
+    for pattern in ("%H:%M", "%I:%M%p", "%I:%M %p"):
+        try:
+            return datetime.combine(datetime.now().date(), datetime.strptime(normalized, pattern).time())
+        except ValueError:
+            continue
+    raise ValueError("รูปแบบเวลาไม่ถูกต้อง")
 
 def find_reservation_conflict(reservations, table_number, when, ignore_id=None, slot_minutes=RESERVATION_SLOT_MINUTES):
     """Return the existing active reservation that overlaps `when` for the same table, or None."""

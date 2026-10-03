@@ -8,6 +8,15 @@
       "member_points": 0,
       "active": true,
       "password_hash": "pbkdf2_sha256$120000$360800526b0cd3ee3d7dfa36638b0b3f$57ac8873de5d31cd5fa74cc99e467bfbe407e8e53a58d36f284ad917db27230a"
+    },
+    "local_fe5d5a1d4e554206": {
+      "id": "local_fe5d5a1d4e554206",
+      "email": "test@gmail.com",
+      "name": "test@gmail.com",
+      "role": "customer",
+      "member_points": 0,
+      "active": true,
+      "password_hash": "pbkdf2_sha256$120000$5019a1f4e82092a15672de9925fb7cfa$1c34eb0eb13c7d35b97a5bfd675d7b6a9bd1cfa2ae03f3a0d77e931a0b5b100b"
     }
   },
   "menus": {
@@ -18,16 +27,7 @@
       "price": 189,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "spice": [
-          "Normal",
-          "Spicy"
-        ],
-        "extra_egg": [
-          "No",
-          "Yes"
-        ]
-      }
+      "options": {}
     },
     "menu_002": {
       "id": "menu_002",
@@ -36,12 +36,7 @@
       "price": 179,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "spice": [
-          "Normal",
-          "Spicy"
-        ]
-      }
+      "options": {}
     },
     "menu_003": {
       "id": "menu_003",
@@ -50,12 +45,7 @@
       "price": 199,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "size": [
-          "Regular",
-          "Large"
-        ]
-      }
+      "options": {}
     },
     "menu_004": {
       "id": "menu_004",
@@ -64,12 +54,7 @@
       "price": 249,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "size": [
-          "10 inch",
-          "12 inch"
-        ]
-      }
+      "options": {}
     },
     "menu_005": {
       "id": "menu_005",
@@ -78,12 +63,7 @@
       "price": 289,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "size": [
-          "10 inch",
-          "12 inch"
-        ]
-      }
+      "options": {}
     },
     "menu_006": {
       "id": "menu_006",
@@ -92,13 +72,7 @@
       "price": 399,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "doneness": [
-          "Medium Rare",
-          "Medium",
-          "Well Done"
-        ]
-      }
+      "options": {}
     },
     "menu_007": {
       "id": "menu_007",
@@ -107,12 +81,7 @@
       "price": 149,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "extra_cheese": [
-          "No",
-          "Yes"
-        ]
-      }
+      "options": {}
     },
     "menu_008": {
       "id": "menu_008",
@@ -139,20 +108,16 @@
       "price": 75,
       "image_url": "",
       "is_out_of_stock": false,
-      "options": {
-        "size": [
-          "Single",
-          "Double"
-        ]
-      }
+      "options": {}
     }
   },
   "tables": {
     "table_01": {
       "id": "table_01",
       "table_number": "01",
-      "status": "available",
-      "current_order_id": null
+      "status": "occupied",
+      "current_order_id": null,
+      "claimed_by": "local_fe5d5a1d4e554206"
     },
     "table_02": {
       "id": "table_02",
@@ -185,8 +150,44 @@
       "current_order_id": null
     }
   },
-  "reservations": {},
+  "reservations": {
+    "res_b3fa1926f454": {
+      "id": "res_b3fa1926f454",
+      "customer_id": "local_fe5d5a1d4e554206",
+      "customer_name": "ะดดเ้",
+      "phone": "99999",
+      "table_number": "01",
+      "datetime": "04:39",
+      "status": "waiting",
+      "source": "customer",
+      "created_by": "local_fe5d5a1d4e554206",
+      "created_at": "2026-10-03T19:39:48.573930+00:00"
+    }
+  },
   "orders": {},
   "kitchen": {},
-  "audit_logs": {}
+  "audit_logs": {
+    "4feac3c7412d4b4db0ad": {
+      "id": "log_fb9f77e7b6bb",
+      "user_id": "local_fe5d5a1d4e554206",
+      "user_name": "test@gmail.com",
+      "role": "customer",
+      "action": "CREATE_RESERVATION",
+      "target_type": "reservation",
+      "target_id": "res_b3fa1926f454",
+      "detail": "table=01 at=04:39",
+      "timestamp": "2026-10-03T19:39:48.575557+00:00"
+    },
+    "e3d21790fe7d4550a65d": {
+      "id": "log_06f132e3edbb",
+      "user_id": "local_fe5d5a1d4e554206",
+      "user_name": "test@gmail.com",
+      "role": "customer",
+      "action": "CLAIM_TABLE",
+      "target_type": "table",
+      "target_id": "table_01",
+      "detail": "",
+      "timestamp": "2026-10-03T19:40:18.075423+00:00"
+    }
+  }
 }

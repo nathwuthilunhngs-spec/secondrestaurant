@@ -101,6 +101,24 @@ def find_table_by_number(table_number):
 
 def require_staff(profile):
     require_role(profile, "admin", "staff")
+def expire_overdue_reservations():
+    reservations = get("reservations") or {}
+    if not isinstance(reservations, dict):
+        return
+    now = datetime.now()
+    for res in reservations.values():
+        if not isinstance(res, dict) or res.get("status") not in {"waiting", "confirmed"}:
+            continue
+        try:
+            when = parse_reservation_dt(res.get("datetime"))
+        except ValueError:
+            continue
+        if now <= when + timedelta(minutes=15):
+            continue
+        patch(f"reservations/{res.get('id')}", {"status": "expired", "expired_at": now_iso()})
+        table = find_table_by_number(res.get("table_number"))
+        if table and not table.get("current_order_id") and table.get("status") != "available":
+            patch(f"tables/{table['id']}", {"status": "available", "claimed_by": None, "current_order_id": None})
 
 def build_order_items(raw_items):
     if not isinstance(raw_items, list) or not raw_items:
@@ -113,9 +131,34 @@ def build_order_items(raw_items):
         if menu.get("is_out_of_stock"):
             raise ValueError(f"เมนู {menu.get('name')} หมด")
         qty = to_positive_int(raw.get("quantity", 1), "จำนวน")
+        selected_options = raw.get("options") or {}
+        if not isinstance(selected_options, dict):
+            raise ValueError("ตัวเลือกเมนูไม่ถูกต้อง")
+        extra_price = 0.0
+        normalized_selected = {}
+        for group, selected in selected_options.items():
+            if group == "note":
+                normalized_selected[group] = str(selected).strip()[:300]
+                continue
+            definitions = (menu.get("options") or {}).get(group, [])
+            if not isinstance(definitions, list):
+                continue
+            found = None
+            for definition in definitions:
+                if isinstance(definition, dict):
+                    if str(definition.get("name")) == str(selected):
+                        found = definition
+                        break
+                elif str(definition) == str(selected):
+                    found = {"name": definition, "price": 0}
+                    break
+            if found is None:
+                raise ValueError(f"ตัวเลือก {group} ไม่ถูกต้อง")
+            normalized_selected[group] = found.get("name")
+            extra_price += float(found.get("price", 0) or 0)
         final_items.append({
-            "menu_id": menu["id"], "name": menu["name"], "unit_price": float(menu["price"]),
-            "quantity": qty, "options": raw.get("options") or {}
+            "menu_id": menu["id"], "name": menu["name"], "unit_price": round(float(menu["price"]) + extra_price, 2),
+            "base_price": float(menu["price"]), "quantity": qty, "options": normalized_selected
         })
     return final_items
 
@@ -171,6 +214,24 @@ class handler(BaseHTTPRequestHandler):
             if path == "/api/me":
                 return response(self, 200, {"ok": True, "user": profile})
 
+            if path == "/api/recommended-menus":
+                orders = get("orders") or {}
+                counts = {}
+                if isinstance(orders, dict):
+                    for order in orders.values():
+                        if not isinstance(order, dict):
+                            continue
+                        for item in order.get("items", []):
+                            menu_id = item.get("menu_id")
+                            if menu_id:
+                                counts[menu_id] = counts.get(menu_id, 0) + int(item.get("quantity", 0) or 0)
+                menus = []
+                for menu in public_menu_list():
+                    if menu.get("id") in counts:
+                        menus.append({**menu, "ordered_count": counts[menu["id"]]})
+                menus.sort(key=lambda item: (-item["ordered_count"], str(item.get("name", ""))))
+                return response(self, 200, {"ok": True, "items": menus[:3]})
+
             if path == "/api/menus":
                 query = qs.get("q", [""])[0]
                 category = qs.get("category", [""])[0]
@@ -180,13 +241,28 @@ class handler(BaseHTTPRequestHandler):
                 menus = search_filter_sort(public_menu_list(), query, category, sort)
                 return response(self, 200, {"ok": True, **paginate(menus, page, page_size)})
 
+            if path == "/api/customer/tables":
+                require_role(profile, "customer")
+                expire_overdue_reservations()
+                tables = get("tables") or {}
+                values = list(tables.values()) if isinstance(tables, dict) else []
+                return response(self, 200, {"ok": True, "tables": values})
+            if path.startswith("/api/customer/table-games/"):
+                require_role(profile, "customer")
+                game_id = path.rsplit("/", 1)[-1]
+                game = find_by_id("table_games", game_id)
+                if not game or profile.get("id") not in game.get("players", []):
+                    return error_response(self, 404, "ไม่พบเกมเลือกโต๊ะ")
+                return response(self, 200, {"ok": True, "game": game})
             if path == "/api/tables":
                 require_staff(profile)
+                expire_overdue_reservations()
                 tables = get("tables") or {}
                 values = list(tables.values()) if isinstance(tables, dict) else []
                 return response(self, 200, {"ok": True, "tables": values})
 
             if path == "/api/reservations":
+                expire_overdue_reservations()
                 reservations = get("reservations") or {}
                 values = list(reservations.values()) if isinstance(reservations, dict) else []
                 if profile.get("role") == "customer":
@@ -194,7 +270,12 @@ class handler(BaseHTTPRequestHandler):
                 return response(self, 200, {"ok": True, "reservations": values})
 
             if path.startswith("/api/orders/") and path.endswith("/bill"):
-                require_staff(profile)
+                order_for_bill = find_by_id("orders", path.split("/")[-2])
+                if profile.get("role") == "customer":
+                    if not order_for_bill or order_for_bill.get("customer_id") != profile.get("id"):
+                        return error_response(self, 404, "ไม่พบบิลของคุณ")
+                else:
+                    require_staff(profile)
                 order = find_by_id("orders", path.split("/")[-2])
                 if not order or order.get("status") in ("closed", "merged"):
                     return error_response(self, 404, "ไม่พบออเดอร์หรือบิลถูกปิดแล้ว")
@@ -423,33 +504,101 @@ class handler(BaseHTTPRequestHandler):
                 audit(profile, "SPLIT_BILL", "order", order_id, f"new={new_id_value}")
                 return response(self, 200, {"ok": True, "new_order": new_order})
 
+            if path == "/api/customer/tables/claim":
+                require_role(profile, "customer")
+                table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
+                table = find_by_id("tables", table_id)
+                if not table:
+                    raise ValueError("ไม่พบโต๊ะ")
+                claimed_by = table.get("claimed_by")
+                if table.get("status") == "reserved":
+                    raise ValueError("โต๊ะนี้มีการจองไว้ กรุณาเลือกโต๊ะอื่น")
+                if claimed_by == profile.get("id"):
+                    return response(self, 200, {"ok": True, "table": table, "claimed": True})
+                if table.get("status") == "available":
+                    patch(f"tables/{table_id}", {"status": "occupied", "claimed_by": profile["id"]})
+                    table = {**table, "status": "occupied", "claimed_by": profile["id"]}
+                    audit(profile, "CLAIM_TABLE", "table", table_id)
+                    return response(self, 200, {"ok": True, "table": table, "claimed": True})
+                if claimed_by and claimed_by != profile.get("id"):
+                    games = get("table_games") or {}
+                    active = None
+                    if isinstance(games, dict):
+                        for g in games.values():
+                            if isinstance(g, dict) and g.get("table_id") == table_id and g.get("status") == "playing" and profile.get("id") in g.get("players", []):
+                                active = g
+                                break
+                    if active:
+                        return error_response(self, 409, {"code": "TABLE_GAME", "game": active})
+                    game = {"id": new_id("game"), "table_id": table_id, "table_number": table.get("table_number"),
+                            "players": [claimed_by, profile["id"]], "choices": {}, "round": 1, "status": "playing", "created_at": now_iso()}
+                    put(f"table_games/{game['id']}", game)
+                    return error_response(self, 409, {"code": "TABLE_GAME", "game": game})
+                raise ValueError("โต๊ะนี้ยังไม่พร้อมให้เลือก")
+            if path.startswith("/api/customer/table-games/") and path.endswith("/choice"):
+                require_role(profile, "customer")
+                game_id = path.split("/")[-2]
+                game = find_by_id("table_games", game_id)
+                if not game or profile.get("id") not in game.get("players", []):
+                    raise ValueError("ไม่พบเกมเลือกโต๊ะ")
+                choice = data.get("choice")
+                if choice not in {"rock", "paper", "scissors"}:
+                    raise ValueError("ตัวเลือกเกมไม่ถูกต้อง")
+                choices = dict(game.get("choices", {}))
+                choices[profile["id"]] = choice
+                game["choices"] = choices
+                if len(choices) >= 2:
+                    p1, p2 = game["players"][:2]
+                    c1, c2 = choices.get(p1), choices.get(p2)
+                    if c1 == c2:
+                        game["choices"] = {}
+                        game["round"] = int(game.get("round", 1)) + 1
+                        game["result"] = "tie"
+                    else:
+                        wins = {("rock", "scissors"), ("scissors", "paper"), ("paper", "rock")}
+                        winner = p1 if (c1, c2) in wins else p2
+                        game["winner"] = winner
+                        game["result"] = "winner"
+                        game["status"] = "finished"
+                        table = find_by_id("tables", game["table_id"])
+                        if table and winner == p2:
+                            patch(f"tables/{game['table_id']}", {"claimed_by": winner})
+                            if table.get("current_order_id"):
+                                patch(f"orders/{table['current_order_id']}", {"customer_id": winner})
+                put(f"table_games/{game_id}", game)
+                return response(self, 200, {"ok": True, "game": game})
             if path == "/api/customer/orders":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
                 table = find_by_id("tables", table_id)
                 if not table:
                     raise ValueError("ไม่พบโต๊ะ")
+                if table.get("claimed_by") not in (None, profile.get("id")):
+                    raise ValueError("โต๊ะนี้ถูกเลือกโดยลูกค้าคนอื่น")
+                if table.get("status") == "reserved":
+                    raise ValueError("โต๊ะนี้ถูกจองไว้")
                 final_items = build_order_items(data.get("items"))
-                order_id = new_id("order")
-                bill = calculate_bill(final_items, 0)
-                order = {
-                    "id": order_id, "table_id": table_id, "table_number": table.get("table_number"),
-                    "customer_id": profile["id"], "items": final_items, **bill,
-                    "status": "open", "created_by": profile["id"], "created_at": now_iso(),
-                    "source": "qr"
-                }
-                put(f"orders/{order_id}", order)
-                patch(f"tables/{table_id}", {"status": "occupied", "current_order_id": order_id})
+                existing = find_by_id("orders", table.get("current_order_id")) if table.get("current_order_id") else None
+                if existing and existing.get("status") not in ("closed", "merged"):
+                    order_id = existing["id"]
+                    all_items = existing.get("items", []) + final_items
+                    bill = calculate_bill(all_items, existing.get("discount", 0))
+                    patch(f"orders/{order_id}", {"items": all_items, "customer_id": profile["id"], **bill})
+                    order = {**existing, "items": all_items, "customer_id": profile["id"], **bill}
+                else:
+                    order_id = new_id("order")
+                    bill = calculate_bill(final_items, 0)
+                    order = {"id": order_id, "table_id": table_id, "table_number": table.get("table_number"),
+                             "customer_id": profile["id"], "items": final_items, **bill, "status": "open",
+                             "created_by": profile["id"], "created_at": now_iso(), "source": "qr"}
+                    put(f"orders/{order_id}", order)
+                    patch(f"tables/{table_id}", {"status": "occupied", "claimed_by": profile["id"], "current_order_id": order_id})
                 for item in final_items:
                     kid = new_id("kit")
-                    put(f"kitchen/{kid}", {
-                        "id": kid, "order_id": order_id, "order_item_id": f"{order_id}_{item['menu_id']}",
-                        "menu_name": item["name"], "options": item["options"],
-                        "table_number": table.get("table_number"), "quantity": item["quantity"],
-                        "status": "pending", "timestamp": now_iso()
-                    })
+                    put(f"kitchen/{kid}", {"id": kid, "order_id": order_id, "order_item_id": f"{order_id}_{item['menu_id']}",
+                         "menu_name": item["name"], "options": item["options"], "table_number": table.get("table_number"),
+                         "quantity": item["quantity"], "status": "pending", "timestamp": now_iso()})
                 return response(self, 201, {"ok": True, "order": order})
-
             if path == "/api/tables/move":
                 require_staff(profile)
                 old_id = clean_text(data.get("old_table_id"), "โต๊ะเดิม", 50)
@@ -491,11 +640,22 @@ class handler(BaseHTTPRequestHandler):
                 return response(self, 200, {"ok": True, "message": "รวมโต๊ะสำเร็จ", "order_id": target_order["id"]})
 
             if path == "/api/reservations":
+                expire_overdue_reservations()
                 name = clean_text(data.get("customer_name"), "ชื่อ", 100)
                 phone = clean_text(data.get("phone"), "เบอร์โทร", 30)
+                if not phone.isdigit():
+                    raise ValueError("เบอร์โทรต้องเป็นตัวเลขเท่านั้น")
                 table_number = clean_text(data.get("table_number"), "โต๊ะ", 20)
-                when_text = clean_text(data.get("datetime"), "วันเวลา", 60)
-                when = parse_reservation_dt(when_text)
+                when_text = clean_text(data.get("datetime"), "เวลา", 10)
+                try:
+                    when = parse_reservation_dt(when_text)
+                except ValueError:
+                    raise ValueError("กรุณาระบุเวลาในรูปแบบ HH:MM")
+                if when.date() != datetime.now().date():
+                    raise ValueError("ระบบรับจองเฉพาะวันนี้เท่านั้น")
+                minimum_time = datetime.now() + timedelta(minutes=30)
+                if when < minimum_time:
+                    raise ValueError("กรุณาจองล่วงหน้าอย่างน้อย 30 นาที")
                 if not find_table_by_number(table_number):
                     raise ValueError("ไม่พบโต๊ะที่เลือก")
                 existing_res = get("reservations") or {}
@@ -594,6 +754,19 @@ class handler(BaseHTTPRequestHandler):
                 patch(f"kitchen/{item_id}", {"status": status, "updated_at": now_iso()})
                 return response(self, 200, {"ok": True, "message": "อัปเดตสถานะครัวสำเร็จ"})
 
+            if path.startswith("/api/orders/") and path.endswith("/request-checkout"):
+                require_role(profile, "customer")
+                order_id = path.split("/")[-2]
+                order = find_by_id("orders", order_id)
+                if not order or order.get("customer_id") != profile.get("id"):
+                    return error_response(self, 404, "ไม่พบบิลของคุณ")
+                if order.get("status") in ("closed", "merged"):
+                    raise ValueError("บิลนี้ปิดแล้ว")
+                patch(f"orders/{order_id}", {"status": "waiting_bill", "checkout_requested_at": now_iso()})
+                table_id = order.get("table_id")
+                if table_id:
+                    patch(f"tables/{table_id}", {"status": "waiting_bill"})
+                return response(self, 200, {"ok": True, "message": "เรียกพนักงานเช็คบิลแล้ว"})
             if path.startswith("/api/orders/") and path.endswith("/checkout"):
                 require_staff(profile)
                 order_id = path.split("/")[-2]
@@ -608,7 +781,7 @@ class handler(BaseHTTPRequestHandler):
                 patch(f"orders/{order_id}", closed)
                 table_id = order.get("table_id")
                 if table_id:
-                    patch(f"tables/{table_id}", {"status": "available", "current_order_id": None})
+                    patch(f"tables/{table_id}", {"status": "available", "current_order_id": None, "claimed_by": None})
                 customer_id = order.get("customer_id")
                 if customer_id:
                     points = int(float(bill["total"]) // 100)
