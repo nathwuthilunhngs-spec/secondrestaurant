@@ -4,15 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>itailaew — Italian Restaurant & Café</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="#" onclick="App.go('home')"><span>itailaew</span><small>Italian Restaurant & Café</small></a>
+  <a class="brand" href="#" onclick="App.go('home');return false"><span>itailaew</span><small>Italian Restaurant & Café</small></a>
   <nav id="main-nav" class="hidden">
-    <button onclick="App.go('home')">Home</button>
-    <button onclick="App.go('menu')">Menu</button>
-    <button onclick="App.go('reservation')">Reservation</button>
+    <button data-roles="customer" onclick="App.go('home')">Home</button>
+    <button data-roles="customer" onclick="App.go('menu')">Menu</button>
+    <button data-roles="customer" onclick="App.go('reservation')">Reservation</button>
+    <button data-roles="admin" onclick="App.go('admin')">Dashboard</button>
+    <button data-roles="staff" onclick="App.go('staff')">Front of House</button>
+    <button data-roles="staff" onclick="App.go('tables')">Tables</button>
+    <button data-roles="staff" onclick="App.go('pos')">Counter Order</button>
     <button id="login-nav" onclick="App.go('login')">Login</button>
     <button id="logout-nav" class="hidden" onclick="App.logout()">Logout</button>
   </nav>
@@ -70,9 +74,27 @@
 </section>
 
 <section id="admin" class="page protected">
-  <div class="dashboard-head"><div><span class="eyebrow">itailaew ADMIN</span><h2>Dashboard</h2></div></div>
-  <div class="stats"><div><span>ยอดขายวันนี้</span><b id="stat-today">฿0</b></div><div><span>ยอดขายรวม</span><b id="stat-total">฿0</b></div><div><span>บิลปิดแล้ว</span><b id="stat-orders">0</b></div></div>
-  <div class="admin-grid"><div class="list-card"><h3>Best Selling Menu</h3><div id="best-sellers"></div></div><div class="list-card"><h3>Quick Actions</h3><div class="actions stack"><button class="secondary" onclick="App.adminPage('menus')">Menu Management</button><button class="secondary" onclick="App.adminPage('users')">Staff / Users</button><button class="secondary" onclick="App.adminPage('logs')">Audit Logs</button></div></div></div>
+  <div class="dashboard-head"><div><span class="eyebrow">itailaew ADMIN</span><h2>Dashboard</h2></div><button class="secondary" onclick="App.loadDashboard()">↻ Refresh</button></div>
+  <div class="stats stats-4">
+    <div><span>ยอดขายวันนี้</span><b id="stat-today">฿0</b></div>
+    <div><span>ยอดขายรวม</span><b id="stat-total">฿0</b></div>
+    <div><span>บิลปิดแล้ว</span><b id="stat-orders">0</b></div>
+    <div><span>ค่าเฉลี่ยต่อบิล</span><b id="stat-avg">฿0</b></div>
+    <div><span>ออเดอร์ที่ยังเปิดอยู่</span><b id="stat-open">0</b></div>
+    <div><span>จองวันนี้</span><b id="stat-res-today">0</b></div>
+    <div><span>จองทั้งหมด</span><b id="stat-res-total">0</b></div>
+    <div><span>ผู้ใช้ทั้งหมด</span><b id="stat-users">0</b></div>
+  </div>
+  <div class="admin-grid">
+    <div class="list-card"><h3>ยอดขาย 7 วันล่าสุด</h3><div id="sales-chart" class="bar-chart"></div></div>
+    <div class="list-card"><h3>Best Selling Menu</h3><div id="best-sellers"></div></div>
+  </div>
+  <div class="admin-grid three">
+    <div class="list-card"><h3>สถานะโต๊ะ</h3><div id="table-summary"></div></div>
+    <div class="list-card"><h3>สถานะการจอง</h3><div id="res-summary"></div></div>
+    <div class="list-card"><h3>ผู้ใช้ตามบทบาท</h3><div id="user-summary"></div></div>
+  </div>
+  <div class="list-card" style="margin-top:18px"><h3>Quick Actions</h3><div class="actions"><button class="secondary" onclick="App.adminPage('menus')">Menu Management</button><button class="secondary" onclick="App.adminPage('users')">Staff / Users</button><button class="secondary" onclick="App.adminPage('logs')">Audit Logs</button></div></div>
   <div id="admin-content" class="admin-content"></div>
 </section>
 
@@ -82,13 +104,37 @@
     <div class="list-card"><h3>Tables</h3><div id="tables-list"></div></div>
     <div class="list-card"><h3>Kitchen Display <small>auto refresh 3s</small></h3><div id="kitchen-list"></div></div>
   </div>
-  <div class="list-card"><h3>Reservations & Queue</h3><div id="staff-reservations"></div></div>
+  <div class="list-card"><div class="section-head" style="margin:0 0 10px"><h3 style="margin:0">Reservations & Queue</h3><button class="primary" onclick="App.showStaffReserve()">+ จองให้ลูกค้า</button></div><div id="staff-reservations"></div></div>
   <div class="list-card"><h3>POS / Current Orders</h3><div id="staff-orders"></div></div>
+</section>
+
+<section id="tables" class="page protected">
+  <div class="dashboard-head"><div><span class="eyebrow">itailaew STAFF</span><h2>Tables</h2></div><div class="legend"><span class="badge available">available</span><span class="badge occupied">occupied</span><span class="badge waiting_bill">waiting_bill</span><span class="badge reserved">reserved</span></div></div>
+  <div id="tables-summary" class="stats stats-4"></div>
+  <div id="tables-grid" class="tables-grid"></div>
+  <div class="small" style="margin-top:12px">อัปเดตอัตโนมัติทุก 3 วินาที</div>
+</section>
+
+<section id="pos" class="page protected">
+  <div class="dashboard-head"><div><span class="eyebrow">itailaew STAFF</span><h2>Counter Order</h2><div class="small">สั่งอาหารแทนลูกค้า — ออเดอร์จะเข้าครัวทันที</div></div></div>
+  <div class="pos-grid">
+    <div class="list-card">
+      <div class="form-grid"><label>โต๊ะ<select id="pos-table"></select></label><label>ค้นหาเมนู<input id="pos-search" placeholder="ค้นหาเมนู..." oninput="App.renderPos()"></label></div>
+      <div id="pos-menu" class="pos-menu"></div>
+    </div>
+    <div class="list-card pos-cart">
+      <h3>รายการที่สั่ง</h3>
+      <div id="pos-cart"></div>
+      <div class="table-row" style="border:0"><span>รวม (ก่อน Service/VAT)</span><b id="pos-total">฿0.00</b></div>
+      <button class="primary full" onclick="App.posSubmit()">ส่งเข้าครัว</button>
+      <button class="secondary full" style="margin-top:8px" onclick="App.posClear()">ล้างรายการ</button>
+    </div>
+  </div>
 </section>
 </main>
 
 <div id="toast" class="toast"></div>
 <div id="modal" class="modal hidden"></div>
-<script src="js/app.js"></script>
+<script src="/js/app.js"></script>
 </body>
 </html>
