@@ -52,7 +52,7 @@
 </section>
 
 <section id="menu" class="page">
-  <div class="section-head"><div><span class="eyebrow">OUR MENU</span><h2>Italian favourites</h2></div><div class="filters"><input id="menu-search" placeholder="ค้นหาเมนู..." oninput="App.loadMenus()"><select id="menu-sort" onchange="App.loadMenus()"><option value="name">ชื่อ</option><option value="price_asc">ราคาต่ำ→สูง</option><option value="price_desc">ราคาสูง→ต่ำ</option></select></div></div>
+  <div class="section-head"><div><span class="eyebrow">OUR MENU</span><h2>Italian favourites</h2></div><div class="actions" style="margin:0"><button id="customer-orders-back" class="secondary hidden" onclick="App.go('customer')">กลับรายการอาหารที่สั่ง</button><div class="filters"><input id="menu-search" placeholder="ค้นหาเมนู..." oninput="App.loadMenus()"><select id="menu-sort" onchange="App.loadMenus()"><option value="name">ชื่อ</option><option value="price_asc">ราคาต่ำ→สูง</option><option value="price_desc">ราคาสูง→ต่ำ</option></select></div></div></div>
   <div id="qr-banner" class="list-card hidden"></div><div id="menu-grid" class="menu-grid"></div><div id="menu-pages" class="pagination"></div>
 </section>
 
@@ -66,7 +66,7 @@
 </section>
 
 <section id="table-select" class="page">
-  <div class="section-head"><div><span class="eyebrow">TABLE SELECTION</span><h2>เลือกโต๊ะก่อนสั่งอาหาร</h2><p class="small">เลือกได้เฉพาะโต๊ะที่ว่าง หากมีผู้เลือกพร้อมกัน ระบบจะให้เล่นเป่ายิ้งฉุบ</p></div><button id="table-back" class="secondary" onclick="App.go('home')">กลับหน้าแรก</button></div>
+  <div class="section-head"><div><span class="eyebrow">TABLE SELECTION</span><h2>เลือกโต๊ะก่อนสั่งอาหาร</h2><p class="small">เลือกได้เฉพาะโต๊ะที่ว่าง ผู้ที่เลือกสำเร็จก่อนจะได้โต๊ะ</p></div><button id="table-back" class="secondary" onclick="App.go('home')">กลับหน้าแรก</button></div>
   <div id="customer-tables" class="tables-grid"></div>
 </section>
 <section id="cart" class="page">
@@ -75,7 +75,7 @@
 </section>
 <section id="customer" class="page">
   <div class="dashboard-head"><div><span class="eyebrow">CUSTOMER</span><h2>Benvenuti, <span id="customer-name"></span></h2></div><div class="points">⭐ <b id="customer-points">0</b> points</div></div>
-  <div class="feature-grid"><div><b>🍽️</b><h3>Digital Menu</h3><p>เลือกเมนูและติดตามออเดอร์</p><button class="secondary" onclick="App.go('menu')">Open Menu</button></div><div><b>📅</b><h3>My Reservations</h3><p>ดูรายการจองโต๊ะ</p><button class="secondary" onclick="App.loadReservations()">Refresh</button></div></div>
+  <div class="feature-grid"><div><b>🍽️</b><h3>Digital Menu</h3><p>เลือกเมนูและติดตามออเดอร์</p><button class="secondary" onclick="App.go('menu')">สั่งเมนูใหม่</button></div><div><b>📅</b><h3>My Reservations</h3><p>ขอย้ายโต๊ะกับพนักงาน</p><button class="secondary" onclick="App.requestMoveTable()">ขอย้ายโต๊ะ</button></div></div>
   <div id="customer-orders" class="list-card"></div>
 </section>
 
@@ -108,9 +108,10 @@
   <div class="dashboard-head"><div><span class="eyebrow">itailaew STAFF</span><h2>Front of House</h2></div></div>
   <div class="staff-grid">
     <div class="list-card"><h3>Tables</h3><div id="tables-list"></div></div>
-    <div class="list-card"><h3>Kitchen Display <small>auto refresh 3s</small></h3><div id="kitchen-list"></div></div>
+    <div class="list-card"><h3>Kitchen Display <small>auto refresh 3s</small></h3><div id="kitchen-list" class="kitchen-list"></div></div>
   </div>
   <div class="list-card"><div class="section-head" style="margin:0 0 10px"><h3 style="margin:0">Reservations & Queue</h3><button class="primary" onclick="App.showStaffReserve()">+ จองให้ลูกค้า</button></div><div id="staff-reservations"></div></div>
+  <div class="list-card"><h3>คำขอย้ายโต๊ะ</h3><div id="staff-move-requests"></div></div>
   <div class="list-card"><h3>POS / Current Orders</h3><div id="staff-orders"></div></div>
 </section>
 

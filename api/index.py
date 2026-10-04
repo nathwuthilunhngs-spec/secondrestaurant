@@ -45,6 +45,16 @@ PUBLIC_GETS = {"/api/health", "/api/config"}
 def new_id(prefix):
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
+def points_discount(items, points_to_use):
+    points = int(points_to_use or 0)
+    if points < 0 or points % 100 != 0:
+        raise ValueError("การใช้แต้มต้องใช้ครั้งละ 100 แต้ม")
+    subtotal = calculate_bill(items, 0)["subtotal"]
+    discount = (points // 100) * 10
+    if discount > subtotal:
+        raise ValueError("แต้มที่ใช้ลดเกินยอดอาหาร")
+    return points, round(discount, 2), subtotal
+
 def json_body(handler):
     length = int(handler.headers.get("Content-Length", "0") or 0)
     if length > 2_000_000:
@@ -247,13 +257,6 @@ class handler(BaseHTTPRequestHandler):
                 tables = get("tables") or {}
                 values = list(tables.values()) if isinstance(tables, dict) else []
                 return response(self, 200, {"ok": True, "tables": values})
-            if path.startswith("/api/customer/table-games/"):
-                require_role(profile, "customer")
-                game_id = path.rsplit("/", 1)[-1]
-                game = find_by_id("table_games", game_id)
-                if not game or profile.get("id") not in game.get("players", []):
-                    return error_response(self, 404, "ไม่พบเกมเลือกโต๊ะ")
-                return response(self, 200, {"ok": True, "game": game})
             if path == "/api/tables":
                 require_staff(profile)
                 expire_overdue_reservations()
@@ -280,14 +283,48 @@ class handler(BaseHTTPRequestHandler):
                 if not order or order.get("status") in ("closed", "merged"):
                     return error_response(self, 404, "ไม่พบออเดอร์หรือบิลถูกปิดแล้ว")
                 discount = to_positive_number(qs.get("discount", ["0"])[0] or 0, "ส่วนลด", allow_zero=True)
-                bill = calculate_bill(order.get("items", []), discount)
-                return response(self, 200, {"ok": True, "order": order, "bill": bill})
+                requested_points = int(order.get("points_to_use", 0) or 0)
+                _, points_reduction, subtotal = points_discount(order.get("items", []), requested_points)
+                if discount + points_reduction > subtotal:
+                    raise ValueError("ส่วนลดรวมเกินยอดอาหาร")
+                bill = calculate_bill(order.get("items", []), discount + points_reduction)
+                bill["manual_discount"] = round(discount, 2)
+                bill["points_used"] = requested_points
+                bill["points_discount"] = points_reduction
+                customer_points = 0
+                if order.get("customer_id"):
+                    customer_points = int((get_profile(order["customer_id"]) or {}).get("member_points", 0) or 0)
+                return response(self, 200, {"ok": True, "order": order, "bill": bill, "customer_points": customer_points})
 
+            if path == "/api/table-move-requests":
+                require_staff(profile)
+                requests = get("table_move_requests") or {}
+                values = list(requests.values()) if isinstance(requests, dict) else []
+                values.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+                return response(self, 200, {"ok": True, "requests": values})
             if path == "/api/orders":
                 orders = get("orders") or {}
                 values = list(orders.values()) if isinstance(orders, dict) else []
                 if profile.get("role") == "customer":
-                    values = [o for o in values if o.get("customer_id") == profile.get("id")]
+                    requested_table_id = qs.get("table_id", [""])[0]
+                    if requested_table_id:
+                        table = find_by_id("tables", requested_table_id)
+                        if not table or table.get("claimed_by") != profile.get("id"):
+                            return error_response(self, 403, "คุณไม่มีสิทธิ์ดูออเดอร์ของโต๊ะนี้")
+                        values = [o for o in values if o.get("table_id") == requested_table_id]
+                    else:
+                        values = [o for o in values if o.get("customer_id") == profile.get("id")]
+                    kitchen = get("kitchen") or {}
+                    kitchen_values = list(kitchen.values()) if isinstance(kitchen, dict) else []
+                    for order in values:
+                        statuses = {}
+                        for item in kitchen_values:
+                            if item.get("order_id") != order.get("id"):
+                                continue
+                            key = item.get("menu_name")
+                            statuses[key] = item.get("status", "pending")
+                        for order_item in order.get("items", []):
+                            order_item["kitchen_status"] = statuses.get(order_item.get("name"), "pending")
                 return response(self, 200, {"ok": True, "orders": values})
 
             if path == "/api/kitchen":
@@ -515,58 +552,26 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError("โต๊ะนี้มีการจองไว้ กรุณาเลือกโต๊ะอื่น")
                 if claimed_by == profile.get("id"):
                     return response(self, 200, {"ok": True, "table": table, "claimed": True})
-                if table.get("status") == "available":
+                if table.get("status") == "available" and not claimed_by:
                     patch(f"tables/{table_id}", {"status": "occupied", "claimed_by": profile["id"]})
                     table = {**table, "status": "occupied", "claimed_by": profile["id"]}
                     audit(profile, "CLAIM_TABLE", "table", table_id)
                     return response(self, 200, {"ok": True, "table": table, "claimed": True})
-                if claimed_by and claimed_by != profile.get("id"):
-                    games = get("table_games") or {}
-                    active = None
-                    if isinstance(games, dict):
-                        for g in games.values():
-                            if isinstance(g, dict) and g.get("table_id") == table_id and g.get("status") == "playing" and profile.get("id") in g.get("players", []):
-                                active = g
-                                break
-                    if active:
-                        return error_response(self, 409, {"code": "TABLE_GAME", "game": active})
-                    game = {"id": new_id("game"), "table_id": table_id, "table_number": table.get("table_number"),
-                            "players": [claimed_by, profile["id"]], "choices": {}, "round": 1, "status": "playing", "created_at": now_iso()}
-                    put(f"table_games/{game['id']}", game)
-                    return error_response(self, 409, {"code": "TABLE_GAME", "game": game})
-                raise ValueError("โต๊ะนี้ยังไม่พร้อมให้เลือก")
-            if path.startswith("/api/customer/table-games/") and path.endswith("/choice"):
+                raise ValueError("โต๊ะนี้ไม่ว่าง กรุณาเลือกโต๊ะอื่น")
+            if path == "/api/customer/table-move-requests":
                 require_role(profile, "customer")
-                game_id = path.split("/")[-2]
-                game = find_by_id("table_games", game_id)
-                if not game or profile.get("id") not in game.get("players", []):
-                    raise ValueError("ไม่พบเกมเลือกโต๊ะ")
-                choice = data.get("choice")
-                if choice not in {"rock", "paper", "scissors"}:
-                    raise ValueError("ตัวเลือกเกมไม่ถูกต้อง")
-                choices = dict(game.get("choices", {}))
-                choices[profile["id"]] = choice
-                game["choices"] = choices
-                if len(choices) >= 2:
-                    p1, p2 = game["players"][:2]
-                    c1, c2 = choices.get(p1), choices.get(p2)
-                    if c1 == c2:
-                        game["choices"] = {}
-                        game["round"] = int(game.get("round", 1)) + 1
-                        game["result"] = "tie"
-                    else:
-                        wins = {("rock", "scissors"), ("scissors", "paper"), ("paper", "rock")}
-                        winner = p1 if (c1, c2) in wins else p2
-                        game["winner"] = winner
-                        game["result"] = "winner"
-                        game["status"] = "finished"
-                        table = find_by_id("tables", game["table_id"])
-                        if table and winner == p2:
-                            patch(f"tables/{game['table_id']}", {"claimed_by": winner})
-                            if table.get("current_order_id"):
-                                patch(f"orders/{table['current_order_id']}", {"customer_id": winner})
-                put(f"table_games/{game_id}", game)
-                return response(self, 200, {"ok": True, "game": game})
+                orders = get("orders") or {}
+                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("customer_id") == profile.get("id") and o.get("status") not in ("closed", "merged")]
+                if not active:
+                    raise ValueError("ต้องสั่งอาหารก่อนจึงจะขอย้ายโต๊ะได้")
+                requests = get("table_move_requests") or {}
+                existing = next((r for r in requests.values() if r.get("customer_id") == profile.get("id") and r.get("status") == "pending"), None) if isinstance(requests, dict) else None
+                if existing:
+                    return response(self, 200, {"ok": True, "request": existing, "message": "มีคำขอย้ายโต๊ะที่รอ Staff ดำเนินการอยู่แล้ว"})
+                order = active[0]
+                request = {"id": new_id("move"), "customer_id": profile.get("id"), "customer_name": profile.get("name"), "table_id": order.get("table_id"), "table_number": order.get("table_number"), "status": "pending", "created_at": now_iso()}
+                put(f"table_move_requests/{request['id']}", request)
+                return response(self, 201, {"ok": True, "request": request})
             if path == "/api/customer/orders":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
@@ -745,6 +750,17 @@ class handler(BaseHTTPRequestHandler):
                 audit(profile, "UPDATE_RESERVATION", "reservation", res_id, new_status)
                 return response(self, 200, {"ok": True, "message": "อัปเดตการจองสำเร็จ"})
 
+            if path.startswith("/api/table-move-requests/"):
+                require_staff(profile)
+                request_id = path.rsplit("/", 1)[-1]
+                request = find_by_id("table_move_requests", request_id)
+                if not request:
+                    return error_response(self, 404, "ไม่พบคำขอย้ายโต๊ะ")
+                status = data.get("status")
+                if status not in {"acknowledged", "completed", "cancelled"}:
+                    raise ValueError("สถานะคำขอย้ายโต๊ะไม่ถูกต้อง")
+                patch(f"table_move_requests/{request_id}", {"status": status, "updated_at": now_iso(), "updated_by": profile.get("id")})
+                return response(self, 200, {"ok": True, "message": "อัปเดตคำขอย้ายโต๊ะแล้ว"})
             if path.startswith("/api/kitchen/"):
                 require_staff(profile)
                 item_id = path.rsplit("/", 1)[-1]
@@ -761,8 +777,16 @@ class handler(BaseHTTPRequestHandler):
                 if not order or order.get("customer_id") != profile.get("id"):
                     return error_response(self, 404, "ไม่พบบิลของคุณ")
                 if order.get("status") in ("closed", "merged"):
-                    raise ValueError("บิลนี้ปิดแล้ว")
-                patch(f"orders/{order_id}", {"status": "waiting_bill", "checkout_requested_at": now_iso()})
+                    raise ValueError("บิลนี้ปิดแล้ว ไม่สามารถเช็คบิลซ้ำได้")
+                requested_points = int(data.get("points_to_use", 0) or 0)
+                if requested_points < 0 or requested_points % 100 != 0:
+                    raise ValueError("การใช้แต้มต้องใช้ครั้งละ 100 แต้ม")
+                customer = get_profile(profile["id"]) or profile
+                available_points = int(customer.get("member_points", 0) or 0)
+                if requested_points > available_points:
+                    raise ValueError("แต้มไม่เพียงพอ")
+                points_discount(order.get("items", []), requested_points)
+                patch(f"orders/{order_id}", {"status": "waiting_bill", "checkout_requested_at": now_iso(), "points_to_use": requested_points})
                 table_id = order.get("table_id")
                 if table_id:
                     patch(f"tables/{table_id}", {"status": "waiting_bill"})
@@ -776,17 +800,30 @@ class handler(BaseHTTPRequestHandler):
                 if order.get("status") in ("closed", "merged"):
                     return error_response(self, 400, "ไม่สามารถเช็คบิลซ้ำได้")
                 discount = to_positive_number(data.get("discount", 0), "ส่วนลด", allow_zero=True)
-                bill = calculate_bill(order.get("items", []), discount)
-                closed = {**bill, "status": "closed", "closed_at": now_iso(), "closed_by": profile["id"]}
+                requested_points, points_reduction, subtotal = points_discount(order.get("items", []), order.get("points_to_use", 0))
+                if discount + points_reduction > subtotal:
+                    raise ValueError("ส่วนลดรวมเกินยอดอาหาร")
+                bill = calculate_bill(order.get("items", []), discount + points_reduction)
+                bill["manual_discount"] = round(discount, 2)
+                bill["points_used"] = requested_points
+                bill["points_discount"] = points_reduction
+                earned_points = int(subtotal // 10)
+                customer_id = order.get("customer_id")
+                current_points = 0
+                if customer_id:
+                    user = get_profile(customer_id) or {}
+                    current_points = int(user.get("member_points", 0) or 0)
+                    if requested_points > current_points:
+                        raise ValueError("แต้มของลูกค้าไม่เพียงพอ")
+                closed = {**bill, "earned_points": earned_points, "status": "closed", "closed_at": now_iso(), "closed_by": profile["id"]}
                 patch(f"orders/{order_id}", closed)
                 table_id = order.get("table_id")
                 if table_id:
                     patch(f"tables/{table_id}", {"status": "available", "current_order_id": None, "claimed_by": None})
-                customer_id = order.get("customer_id")
                 if customer_id:
-                    points = int(float(bill["total"]) // 100)
-                    user = get_profile(customer_id)
-                    patch(f"users/{customer_id}", {"member_points": int(user.get("member_points", 0)) + points})
+                    new_points = current_points - requested_points + earned_points
+                    patch(f"users/{customer_id}", {"member_points": new_points})
+                    closed["member_points_after"] = new_points
                 audit(profile, "CHECKOUT_ORDER", "order", order_id, str(bill["total"]))
                 return response(self, 200, {"ok": True, "order": {**order, **closed}})
 
