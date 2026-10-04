@@ -109,6 +109,19 @@ def find_table_by_number(table_number):
                 return value
     return None
 
+def normalize_available_table(table):
+    """Repair stale claims so an available table can be selected."""
+    if not table or table.get("status") != "available":
+        return table
+    if not table.get("claimed_by") and not table.get("current_order_id"):
+        return table
+    order = find_by_id("orders", table.get("current_order_id")) if table.get("current_order_id") else None
+    if order and order.get("status") not in ("closed", "merged"):
+        patch(f"tables/{table['id']}", {"status": "occupied"})
+        return {**table, "status": "occupied"}
+    patch(f"tables/{table['id']}", {"claimed_by": None, "current_order_id": None})
+    return {**table, "claimed_by": None, "current_order_id": None}
+
 def require_staff(profile):
     require_role(profile, "admin", "staff")
 def expire_overdue_reservations():
@@ -255,7 +268,7 @@ class handler(BaseHTTPRequestHandler):
                 require_role(profile, "customer")
                 expire_overdue_reservations()
                 tables = get("tables") or {}
-                values = list(tables.values()) if isinstance(tables, dict) else []
+                values = [normalize_available_table(t) for t in (list(tables.values()) if isinstance(tables, dict) else [])]
                 return response(self, 200, {"ok": True, "tables": values})
             if path == "/api/tables":
                 require_staff(profile)
@@ -275,7 +288,9 @@ class handler(BaseHTTPRequestHandler):
             if path.startswith("/api/orders/") and path.endswith("/bill"):
                 order_for_bill = find_by_id("orders", path.split("/")[-2])
                 if profile.get("role") == "customer":
-                    if not order_for_bill or order_for_bill.get("customer_id") != profile.get("id"):
+                    bill_table = find_by_id("tables", order_for_bill.get("table_id")) if order_for_bill else None
+                    allowed_customer = order_for_bill and (order_for_bill.get("customer_id") == profile.get("id") or (bill_table and bill_table.get("claimed_by") == profile.get("id")))
+                    if not allowed_customer:
                         return error_response(self, 404, "ไม่พบบิลของคุณ")
                 else:
                     require_staff(profile)
@@ -296,6 +311,12 @@ class handler(BaseHTTPRequestHandler):
                     customer_points = int((get_profile(order["customer_id"]) or {}).get("member_points", 0) or 0)
                 return response(self, 200, {"ok": True, "order": order, "bill": bill, "customer_points": customer_points})
 
+            if path == "/api/customer/table-move-requests":
+                require_role(profile, "customer")
+                requests = get("table_move_requests") or {}
+                values = [r for r in (requests.values() if isinstance(requests, dict) else []) if r.get("customer_id") == profile.get("id")]
+                values.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+                return response(self, 200, {"ok": True, "requests": values})
             if path == "/api/table-move-requests":
                 require_staff(profile)
                 requests = get("table_move_requests") or {}
@@ -325,6 +346,10 @@ class handler(BaseHTTPRequestHandler):
                             statuses[key] = item.get("status", "pending")
                         for order_item in order.get("items", []):
                             order_item["kitchen_status"] = statuses.get(order_item.get("name"), "pending")
+                if profile.get("role") in ("admin", "staff"):
+                    for order in values:
+                        table = find_by_id("tables", order.get("table_id"))
+                        order["split_requested"] = bool(table and table.get("split_requested"))
                 return response(self, 200, {"ok": True, "orders": values})
 
             if path == "/api/kitchen":
@@ -510,6 +535,34 @@ class handler(BaseHTTPRequestHandler):
                 audit(profile, "CREATE_ORDER", "order", order_id, f"table={table_id}")
                 return response(self, 201, {"ok": True, "order": order})
 
+            if path == "/api/orders/split-by-customer":
+                require_staff(profile)
+                order_id = clean_text(data.get("order_id"), "Order ID", 80)
+                order = find_by_id("orders", order_id)
+                if not order or order.get("status") in ("closed", "merged"):
+                    raise ValueError("ไม่พบออเดอร์หรือบิลถูกปิดแล้ว")
+                table = find_by_id("tables", order.get("table_id"))
+                if not table or not table.get("split_requested"):
+                    raise ValueError("ลูกค้ายังไม่ได้ขอแยกบิล")
+                items = order.get("items", [])
+                groups = {}
+                central = []
+                for item in items:
+                    cid = item.get("customer_id")
+                    (groups.setdefault(cid, []) if cid else central).append(item)
+                created = []
+                for cid, group in groups.items():
+                    if not group: continue
+                    nid = new_id("order")
+                    bill = calculate_bill(group, 0)
+                    child = {**bill, "id": nid, "table_id": order["table_id"], "table_number": order.get("table_number"), "customer_id": cid, "items": group, "status": "open", "created_by": profile["id"], "created_at": now_iso(), "split_from": order_id}
+                    put(f"orders/{nid}", child); created.append(child)
+                if central:
+                    patch(f"orders/{order_id}", {"items": central, **calculate_bill(central, 0), "split_role": "central"})
+                else:
+                    patch(f"orders/{order_id}", {"status": "merged", "split_role": "split_parent"})
+                patch(f"tables/{order['table_id']}", {"split_requested": False, "split_requested_by": None})
+                return response(self, 200, {"ok": True, "orders": created, "central": central})
             if path == "/api/orders/split":
                 require_staff(profile)
                 order_id = clean_text(data.get("order_id"), "Order ID", 80)
@@ -544,7 +597,7 @@ class handler(BaseHTTPRequestHandler):
             if path == "/api/customer/tables/claim":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
-                table = find_by_id("tables", table_id)
+                table = normalize_available_table(find_by_id("tables", table_id))
                 if not table:
                     raise ValueError("ไม่พบโต๊ะ")
                 claimed_by = table.get("claimed_by")
@@ -558,10 +611,33 @@ class handler(BaseHTTPRequestHandler):
                     audit(profile, "CLAIM_TABLE", "table", table_id)
                     return response(self, 200, {"ok": True, "table": table, "claimed": True})
                 raise ValueError("โต๊ะนี้ไม่ว่าง กรุณาเลือกโต๊ะอื่น")
+            if path == "/api/customer/tables/confirm":
+                require_role(profile, "customer")
+                table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
+                table = find_by_id("tables", table_id)
+                if not table or table.get("claimed_by") != profile.get("id"):
+                    raise ValueError("คุณยังไม่ได้เลือกโต๊ะนี้")
+                capacity = int(table.get("capacity", 4) or 4)
+                party_size = to_positive_int(data.get("party_size"), "จำนวนคน")
+                if party_size > capacity:
+                    raise ValueError(f"โต๊ะนี้รองรับได้สูงสุด {capacity} คน")
+                patch(f"tables/{table_id}", {"party_size": party_size})
+                return response(self, 200, {"ok": True, "table": {**table, "party_size": party_size, "capacity": capacity}})
+            if path == "/api/customer/tables/release":
+                require_role(profile, "customer")
+                table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
+                table = find_by_id("tables", table_id)
+                if table and table.get("claimed_by") == profile.get("id") and not table.get("current_order_id"):
+                    patch(f"tables/{table_id}", {"status": "available", "claimed_by": None, "party_size": None})
+                return response(self, 200, {"ok": True})
             if path == "/api/customer/table-move-requests":
                 require_role(profile, "customer")
+                tables = get("tables") or {}
+                current_table = next((t for t in (tables.values() if isinstance(tables, dict) else []) if t.get("claimed_by") == profile.get("id") and t.get("status") != "available"), None)
+                if not current_table:
+                    raise ValueError("คุณยังไม่ได้เลือกโต๊ะ")
                 orders = get("orders") or {}
-                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("customer_id") == profile.get("id") and o.get("status") not in ("closed", "merged")]
+                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == current_table.get("id") and o.get("status") not in ("closed", "merged")]
                 if not active:
                     raise ValueError("ต้องสั่งอาหารก่อนจึงจะขอย้ายโต๊ะได้")
                 requests = get("table_move_requests") or {}
@@ -569,9 +645,29 @@ class handler(BaseHTTPRequestHandler):
                 if existing:
                     return response(self, 200, {"ok": True, "request": existing, "message": "มีคำขอย้ายโต๊ะที่รอ Staff ดำเนินการอยู่แล้ว"})
                 order = active[0]
-                request = {"id": new_id("move"), "customer_id": profile.get("id"), "customer_name": profile.get("name"), "table_id": order.get("table_id"), "table_number": order.get("table_number"), "status": "pending", "created_at": now_iso()}
+                target_id = clean_text(data.get("new_table_id"), "โต๊ะปลายทาง", 50)
+                target = find_by_id("tables", target_id)
+                if not target or target.get("status") != "available":
+                    raise ValueError("โต๊ะปลายทางไม่ว่าง")
+                if target_id == order.get("table_id"):
+                    raise ValueError("โต๊ะปลายทางต้องต่างจากโต๊ะปัจจุบัน")
+                request = {"id": new_id("move"), "customer_id": profile.get("id"), "customer_name": profile.get("name"), "table_id": order.get("table_id"), "table_number": order.get("table_number"), "new_table_id": target_id, "new_table_number": target.get("table_number"), "status": "pending", "created_at": now_iso()}
                 put(f"table_move_requests/{request['id']}", request)
                 return response(self, 201, {"ok": True, "request": request})
+            if path == "/api/customer/split-bill-requests":
+                require_role(profile, "customer")
+                table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
+                table = find_by_id("tables", table_id)
+                if not table or table.get("claimed_by") != profile.get("id"):
+                    raise ValueError("คุณไม่มีสิทธิ์ขอแยกบิลโต๊ะนี้")
+                orders = get("orders") or {}
+                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table_id and o.get("status") not in ("closed", "merged")]
+                if not active:
+                    raise ValueError("ยังไม่มีบิลที่เปิดอยู่")
+                if table.get("split_requested"):
+                    return response(self, 200, {"ok": True, "message": "โต๊ะนี้ขอแยกบิลไว้แล้ว"})
+                patch(f"tables/{table_id}", {"split_requested": True, "split_requested_by": profile.get("id"), "split_requested_at": now_iso()})
+                return response(self, 201, {"ok": True, "message": "ส่งคำขอแยกบิลให้ Staff แล้ว"})
             if path == "/api/customer/orders":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
@@ -582,22 +678,28 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError("โต๊ะนี้ถูกเลือกโดยลูกค้าคนอื่น")
                 if table.get("status") == "reserved":
                     raise ValueError("โต๊ะนี้ถูกจองไว้")
+                capacity = int(table.get("capacity", 4) or 4)
+                party_size = to_positive_int(data.get("party_size") or table.get("party_size"), "จำนวนคน")
+                if party_size > capacity:
+                    raise ValueError(f"โต๊ะนี้รองรับได้สูงสุด {capacity} คน")
                 final_items = build_order_items(data.get("items"))
+                for item in final_items:
+                    item["customer_id"] = profile.get("id")
                 existing = find_by_id("orders", table.get("current_order_id")) if table.get("current_order_id") else None
                 if existing and existing.get("status") not in ("closed", "merged"):
                     order_id = existing["id"]
                     all_items = existing.get("items", []) + final_items
                     bill = calculate_bill(all_items, existing.get("discount", 0))
-                    patch(f"orders/{order_id}", {"items": all_items, "customer_id": profile["id"], **bill})
-                    order = {**existing, "items": all_items, "customer_id": profile["id"], **bill}
+                    patch(f"orders/{order_id}", {"items": all_items, "customer_id": profile["id"], "party_size": party_size, **bill})
+                    order = {**existing, "items": all_items, "customer_id": profile["id"], "party_size": party_size, **bill}
                 else:
                     order_id = new_id("order")
                     bill = calculate_bill(final_items, 0)
                     order = {"id": order_id, "table_id": table_id, "table_number": table.get("table_number"),
-                             "customer_id": profile["id"], "items": final_items, **bill, "status": "open",
+                             "customer_id": profile["id"], "party_size": party_size, "items": final_items, **bill, "status": "open",
                              "created_by": profile["id"], "created_at": now_iso(), "source": "qr"}
                     put(f"orders/{order_id}", order)
-                    patch(f"tables/{table_id}", {"status": "occupied", "claimed_by": profile["id"], "current_order_id": order_id})
+                    patch(f"tables/{table_id}", {"status": "occupied", "claimed_by": profile["id"], "party_size": party_size, "current_order_id": order_id})
                 for item in final_items:
                     kid = new_id("kit")
                     put(f"kitchen/{kid}", {"id": kid, "order_id": order_id, "order_item_id": f"{order_id}_{item['menu_id']}",
@@ -648,8 +750,8 @@ class handler(BaseHTTPRequestHandler):
                 expire_overdue_reservations()
                 name = clean_text(data.get("customer_name"), "ชื่อ", 100)
                 phone = clean_text(data.get("phone"), "เบอร์โทร", 30)
-                if not phone.isdigit():
-                    raise ValueError("เบอร์โทรต้องเป็นตัวเลขเท่านั้น")
+                if not phone.isdigit() or len(phone) != 10:
+                    raise ValueError("เบอร์โทรต้องเป็นตัวเลข 10 หลักเท่านั้น")
                 table_number = clean_text(data.get("table_number"), "โต๊ะ", 20)
                 when_text = clean_text(data.get("datetime"), "เวลา", 10)
                 try:
@@ -661,17 +763,25 @@ class handler(BaseHTTPRequestHandler):
                 minimum_time = datetime.now() + timedelta(minutes=30)
                 if when < minimum_time:
                     raise ValueError("กรุณาจองล่วงหน้าอย่างน้อย 30 นาที")
-                if not find_table_by_number(table_number):
+                table_for_reservation = find_table_by_number(table_number)
+                if not table_for_reservation:
                     raise ValueError("ไม่พบโต๊ะที่เลือก")
+                by_staff = profile.get("role") in ("admin", "staff")
+                party_size_value = data.get("party_size")
+                if by_staff and party_size_value in (None, ""):
+                    raise ValueError("กรุณาระบุจำนวนคน")
+                party_size = to_positive_int(party_size_value, "จำนวนคน") if party_size_value not in (None, "") else None
+                capacity = int(table_for_reservation.get("capacity", 4) or 4)
+                if party_size is not None and party_size > capacity:
+                    raise ValueError(f"โต๊ะ {table_number} รองรับได้สูงสุด {capacity} คน")
                 existing_res = get("reservations") or {}
                 existing_list = list(existing_res.values()) if isinstance(existing_res, dict) else []
                 clash = find_reservation_conflict(existing_list, table_number, when)
                 if clash:
                     raise ValueError(f"โต๊ะ {table_number} ถูกจองไว้แล้วในช่วงเวลาใกล้เคียง ({clash.get('datetime')}) กรุณาเลือกเวลาหรือโต๊ะอื่น")
-                by_staff = profile.get("role") in ("admin", "staff")
                 reservation = {
                     "id": new_id("res"), "customer_id": None if by_staff else profile["id"], "customer_name": name,
-                    "phone": phone, "table_number": table_number, "datetime": when_text,
+                    "phone": phone, "table_number": table_number, "party_size": party_size, "datetime": when_text,
                     # A booking taken by staff (phone / walk-in) is confirmed immediately
                     "status": "confirmed" if by_staff else "waiting",
                     "source": "staff" if by_staff else "customer",
@@ -722,11 +832,18 @@ class handler(BaseHTTPRequestHandler):
             if path.startswith("/api/tables/"):
                 require_staff(profile)
                 table_id = path.rsplit("/", 1)[-1]
-                allowed = {"available", "occupied", "waiting_bill", "reserved"}
-                status = data.get("status")
-                if status not in allowed:
-                    raise ValueError("สถานะโต๊ะไม่ถูกต้อง")
-                patch(f"tables/{table_id}", {"status": status})
+                updates = {}
+                if "capacity" in data:
+                    require_role(profile, "admin")
+                    updates["capacity"] = to_positive_int(data.get("capacity"), "ความจุโต๊ะ")
+                if "status" in data:
+                    allowed = {"available", "occupied", "waiting_bill", "reserved"}
+                    if data.get("status") not in allowed:
+                        raise ValueError("สถานะโต๊ะไม่ถูกต้อง")
+                    updates["status"] = data.get("status")
+                if not updates:
+                    raise ValueError("ไม่มีข้อมูลที่ต้องการอัปเดต")
+                patch(f"tables/{table_id}", updates)
                 return response(self, 200, {"ok": True, "message": "อัปเดตโต๊ะสำเร็จ"})
 
             if path.startswith("/api/reservations/"):
@@ -759,6 +876,18 @@ class handler(BaseHTTPRequestHandler):
                 status = data.get("status")
                 if status not in {"acknowledged", "completed", "cancelled"}:
                     raise ValueError("สถานะคำขอย้ายโต๊ะไม่ถูกต้อง")
+                if status == "completed":
+                    old_table = find_by_id("tables", request.get("table_id"))
+                    new_table = find_by_id("tables", request.get("new_table_id"))
+                    if not old_table or not new_table or new_table.get("status") != "available":
+                        raise ValueError("โต๊ะปลายทางไม่ว่างหรือไม่พบโต๊ะ")
+                    order_id = old_table.get("current_order_id")
+                    patch(f"tables/{request['table_id']}", {"status": "available", "current_order_id": None, "claimed_by": None, "party_size": None})
+                    patch(f"tables/{request['new_table_id']}", {"status": "occupied", "current_order_id": order_id, "claimed_by": request.get("customer_id"), "party_size": old_table.get("party_size")})
+                    if order_id:
+                        patch(f"orders/{order_id}", {"table_id": request["new_table_id"], "table_number": new_table.get("table_number")})
+                    patch(f"table_move_requests/{request_id}", {"status": status, "updated_at": now_iso(), "updated_by": profile.get("id")})
+                    return response(self, 200, {"ok": True, "message": "ย้ายโต๊ะจริงสำเร็จ"})
                 patch(f"table_move_requests/{request_id}", {"status": status, "updated_at": now_iso(), "updated_by": profile.get("id")})
                 return response(self, 200, {"ok": True, "message": "อัปเดตคำขอย้ายโต๊ะแล้ว"})
             if path.startswith("/api/kitchen/"):
@@ -774,7 +903,8 @@ class handler(BaseHTTPRequestHandler):
                 require_role(profile, "customer")
                 order_id = path.split("/")[-2]
                 order = find_by_id("orders", order_id)
-                if not order or order.get("customer_id") != profile.get("id"):
+                bill_table = find_by_id("tables", order.get("table_id")) if order else None
+                if not order or not (order.get("customer_id") == profile.get("id") or (bill_table and bill_table.get("claimed_by") == profile.get("id"))):
                     return error_response(self, 404, "ไม่พบบิลของคุณ")
                 if order.get("status") in ("closed", "merged"):
                     raise ValueError("บิลนี้ปิดแล้ว ไม่สามารถเช็คบิลซ้ำได้")
@@ -819,7 +949,12 @@ class handler(BaseHTTPRequestHandler):
                 patch(f"orders/{order_id}", closed)
                 table_id = order.get("table_id")
                 if table_id:
-                    patch(f"tables/{table_id}", {"status": "available", "current_order_id": None, "claimed_by": None})
+                    all_orders = get("orders") or {}
+                    remaining = [o for o in (all_orders.values() if isinstance(all_orders, dict) else []) if o.get("table_id") == table_id and o.get("id") != order_id and o.get("status") not in ("closed", "merged")]
+                    if remaining:
+                        patch(f"tables/{table_id}", {"status": "waiting_bill", "current_order_id": remaining[0].get("id")})
+                    else:
+                        patch(f"tables/{table_id}", {"status": "available", "current_order_id": None, "claimed_by": None, "party_size": None, "split_requested": False})
                 if customer_id:
                     new_points = current_points - requested_points + earned_points
                     patch(f"users/{customer_id}", {"member_points": new_points})

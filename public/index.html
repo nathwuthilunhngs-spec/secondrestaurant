@@ -17,7 +17,7 @@
     <button id="reservation-nav" data-roles="customer" onclick="App.go('reservation')">จองโต๊ะ</button>
     <button data-roles="admin" onclick="App.go('admin')">Dashboard</button>
     <button data-roles="staff" onclick="App.go('staff')">Front of House</button>
-    <button data-roles="staff" onclick="App.go('tables')">Tables</button>
+    <button data-roles="admin,staff" onclick="App.go('tables')">Tables</button>
     <button data-roles="staff" onclick="App.go('pos')">Counter Order</button>
     <button id="login-nav" onclick="App.go('login')">Login</button>
     <button id="logout-nav" class="hidden" onclick="App.logout()">Logout</button>
@@ -44,7 +44,7 @@
     <form id="auth-form" onsubmit="App.submitAuth(event)">
       <h2 id="auth-title">Welcome back</h2>
       <label id="name-label" class="hidden">ชื่อ<input id="auth-name"></label>
-      <label>Email<input id="auth-email" type="email" required></label>
+      <label>Email<input id="auth-email" type="email" pattern="[^@\s]+@(gmail\.com|outlook\.com|hotmail\.com|kkumail\.com)" title="อนุญาตเฉพาะ gmail.com, outlook.com, hotmail.com หรือ kkumail.com" required></label>
       <label>Password<input id="auth-password" type="password" required></label>
       <button class="primary full">Continue</button>
     </form>
@@ -59,7 +59,7 @@
 <section id="reservation" class="page">
   <div class="section-head"><div><span class="eyebrow">RESERVATION</span><h2>Reserve your table</h2></div><button class="secondary" onclick="App.go('home')">กลับหน้าแรก</button></div>
   <div class="form-card"><p class="small"><b>จองสำหรับวันนี้เท่านั้น</b> — ต้องจองล่วงหน้าอย่างน้อย 30 นาที และกรุณามาถึงภายใน 15 นาทีหลังเวลาจอง มิฉะนั้นจะถือว่าสละสิทธิ์และโต๊ะจะกลับมาว่างอัตโนมัติ</p><form onsubmit="App.reserve(event)">
-    <div class="form-grid"><label>ชื่อ<input id="res-name" required></label><label>เบอร์โทร<input id="res-phone" type="tel" inputmode="numeric" pattern="[0-9]+" required></label><label>โต๊ะ<select id="res-table"><option>01</option><option>02</option><option>03</option><option>04</option><option>05</option><option>06</option></select></label><label>เวลา<input id="res-date" type="time" required></label></div>
+    <div class="form-grid"><label>ชื่อ<input id="res-name" required></label><label>เบอร์โทร<input id="res-phone" type="tel" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" minlength="10" required></label><label>โต๊ะ<select id="res-table"><option>01</option><option>02</option><option>03</option><option>04</option><option>05</option><option>06</option></select></label><label>เวลา<input id="res-date" type="time" required></label></div>
     <button class="primary">จองโต๊ะ</button>
   </form></div>
   <div id="my-reservations" class="list-card"></div>

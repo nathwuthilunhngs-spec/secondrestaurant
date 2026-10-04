@@ -1,5 +1,5 @@
 const App = (() => {
-  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, selectedTable: JSON.parse(localStorage.getItem("itailaew_selected_table") || "null"), menus: [], hasActiveOrder: false };
+  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, selectedTable: null, pendingTable: null, cart: {}, menus: [], hasActiveOrder: false, hadActiveOrder: false };
   const $ = id => document.getElementById(id);
 
   async function api(path, options = {}) {
@@ -66,7 +66,7 @@ const App = (() => {
       const body = {email:$("auth-email").value, password:$("auth-password").value};
       if (mode === "register") body.name = $("auth-name").value;
       const data = await api(`/api/auth/${mode === "login" ? "login" : "register"}`, {method:"POST",body:JSON.stringify(body)});
-      state.token = data.token; state.user = data.user; localStorage.setItem("itailaew_token", state.token); validateSelectedTableForUser();
+      state.token = data.token; state.user = data.user; localStorage.setItem("itailaew_token", state.token); loadUserStorage(); validateSelectedTableForUser();
       refreshNav(); toast(data.message);
       if (state.user.role === "admin") go("admin"); else if (state.user.role === "staff") go("staff"); else go("home");
     } catch(e) { toast(e.message); }
@@ -99,7 +99,7 @@ const App = (() => {
 
   function logout() {
     if (state.polling) { clearInterval(state.polling); state.polling = null; }
-    state.user = null; state.token = null; localStorage.removeItem("itailaew_token"); clearSelectedTable(); state.cart = {}; localStorage.removeItem("itailaew_cart");
+    state.user = null; state.token = null; state.hadActiveOrder=false; state.hasActiveOrder=false; localStorage.removeItem("itailaew_token"); state.selectedTable=null; state.cart={};
     refreshNav();
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     $("login")?.classList.add("active");
@@ -122,7 +122,21 @@ const App = (() => {
     try {
       const data = await api("/api/me");
       state.user = data.user;
+      loadUserStorage();
       validateSelectedTableForUser();
+      if (state.user.role === "customer" && state.selectedTable) {
+        try {
+          const moves = await api("/api/customer/table-move-requests");
+          const completed = moves.requests.find(r => r.status === "completed");
+          const tables = await api("/api/customer/tables");
+          if (completed) {
+            const moved = tables.tables.find(t => t.id === completed.new_table_id && t.claimed_by === state.user.id);
+            if (moved) { state.selectedTable = moved; localStorage.setItem(tableKey(), JSON.stringify(moved)); }
+          }
+          const live = tables.tables.find(t => t.id === state.selectedTable?.id);
+          if (!live || live.status === "available" || live.claimed_by !== state.user.id) clearCustomerSessionData();
+        } catch (_) { }
+      }
       refreshNav();
       const target = state.user.role === "admin" ? "admin" : state.user.role === "staff" ? "staff" : "home";
       document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
@@ -152,9 +166,14 @@ const App = (() => {
     try{const data=await api("/api/recommended-menus");grid.innerHTML=data.items.map(m=>`<article class="menu-card"><div class="menu-image">${m.image_url?`<img src="${escapeHtml(m.image_url)}" style="width:100%;height:100%;object-fit:cover">`:(m.category==="Pizza"?"🍕":m.category==="Dessert"?"🍰":"🍝")}</div><div class="menu-body"><h3>${escapeHtml(m.name)}</h3><p>${escapeHtml(m.category)} · สั่งแล้ว ${Number(m.ordered_count)} ครั้ง</p><span class="price">฿${Number(m.price).toFixed(2)}</span></div></article>`).join("")||`<div class="list-card">ยังไม่มีข้อมูลเมนูยอดนิยม</div>`}catch(e){grid.innerHTML=`<div class="list-card">${escapeHtml(e.message)}</div>`}
   }
 
-  function persistCart(){ localStorage.setItem("itailaew_cart", JSON.stringify(state.cart)); }
+  function userKey(){ return state.user?.id ? String(state.user.id).replace(/[^a-zA-Z0-9_-]/g,"_") : "anonymous"; }
+  function cartKey(){ return `itailaew_cart_${userKey()}`; }
+  function tableKey(){ return `itailaew_selected_table_${userKey()}`; }
+  function loadUserStorage(){ if(!state.user)return; try{state.cart=JSON.parse(localStorage.getItem(cartKey())||"{}");}catch(_){state.cart={};} try{state.selectedTable=JSON.parse(localStorage.getItem(tableKey())||"null");}catch(_){state.selectedTable=null;} }
+  function persistCart(){ if(state.user) localStorage.setItem(cartKey(), JSON.stringify(state.cart||{})); }
   function selectedTable(){ return state.selectedTable; }
-  function clearSelectedTable(){ state.selectedTable=null; localStorage.removeItem("itailaew_selected_table"); refreshNav(); }
+  function clearSelectedTable(){ state.selectedTable=null; if(state.user)localStorage.removeItem(tableKey()); refreshNav(); }
+  function clearCustomerSessionData(){ state.cart={}; state.selectedTable=null; state.hadActiveOrder=false; if(state.user){localStorage.removeItem(cartKey());localStorage.removeItem(tableKey());} refreshNav(); }
   function validateSelectedTableForUser(){ if(state.user?.role === "customer" && state.selectedTable && state.selectedTable.claimed_by && state.selectedTable.claimed_by !== state.user.id) clearSelectedTable(); }
   async function quickOrder(menuId){
     if(!state.user) return go("login"); if(state.user.role!=="customer") return toast("ฟังก์ชันนี้สำหรับ Customer"); if(!selectedTable()) return go("table-select");
@@ -177,14 +196,23 @@ const App = (() => {
   function clearCart(){state.cart={};persistCart();renderCart()}
   async function submitCart(){
     if(!selectedTable()) return toast("กรุณาเลือกโต๊ะก่อน"); const items=Object.values(state.cart).map(x=>({menu_id:x.menu_id,quantity:x.quantity,options:x.options||{}})); if(!items.length)return toast("กรุณาเพิ่มอาหารลงตะกร้า");
-    try{await api("/api/customer/orders",{method:"POST",body:JSON.stringify({table_id:selectedTable().id,items})});clearCart();toast("ส่งออเดอร์เข้าครัวแล้ว");go("customer")}catch(e){toast(e.message)}
+    try{await api("/api/customer/orders",{method:"POST",body:JSON.stringify({table_id:selectedTable().id,party_size:selectedTable().party_size,items})});clearCart();toast("ส่งออเดอร์เข้าครัวแล้ว");go("customer")}catch(e){toast(e.message)}
   }
   async function loadCustomerTables(){
-    try{const d=await api("/api/customer/tables");$("customer-tables").innerHTML=d.tables.map(t=>{const unavailable=t.status!=="available";return `<div class="table-card"><div class="top"><h3>โต๊ะ ${escapeHtml(t.table_number)}</h3><span class="badge ${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></div><div class="info">${unavailable?"โต๊ะนี้ไม่ว่าง":"โต๊ะว่างพร้อมให้เลือก"}</div><button class="primary full" ${unavailable?"disabled":""} onclick="App.claimTable('${t.id}')">${unavailable?"ไม่ว่าง":"เลือกโต๊ะนี้"}</button></div>`}).join("")}catch(e){toast(e.message)}
+    try{const d=await api("/api/customer/tables");$("customer-tables").innerHTML=d.tables.map(t=>{const unavailable=t.status!=="available";const capacity=Number(t.capacity||4);return `<div class="table-card"><div class="top"><h3>โต๊ะ ${escapeHtml(t.table_number)}</h3><span class="badge ${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></div><div class="info">${unavailable?"โต๊ะนี้ไม่ว่าง":"โต๊ะว่างพร้อมให้เลือก"}<br>รองรับสูงสุด ${capacity} คน</div><button class="primary full" ${unavailable?"disabled":""} onclick="App.claimTable('${t.id}')">${unavailable?"ไม่ว่าง":"เลือกโต๊ะนี้"}</button></div>`}).join("")}catch(e){toast(e.message)}
   }
   async function claimTable(id){
-    try{const d=await api("/api/customer/tables/claim",{method:"POST",body:JSON.stringify({table_id:id})});state.selectedTable=d.table;localStorage.setItem("itailaew_selected_table",JSON.stringify(state.selectedTable));refreshNav();toast(`เลือกโต๊ะ ${d.table.table_number} แล้ว`);go("menu")}
+    try{const d=await api("/api/customer/tables/claim",{method:"POST",body:JSON.stringify({table_id:id})});state.pendingTable=d.table;openModal(`<h2>ระบุจำนวนคน</h2><p class="small">โต๊ะ ${escapeHtml(d.table.table_number)} รองรับสูงสุด ${Number(d.table.capacity||4)} คน</p><form onsubmit="App.confirmPartySize(event)"><label>จำนวนคนที่จะเข้า<input id="party-size" type="number" min="1" max="${Number(d.table.capacity||4)}" required></label><div class="actions"><button class="primary">ยืนยันจำนวนคน</button><button type="button" class="secondary" onclick="App.cancelPartySize()">ยกเลิก</button></div></form>`)}
     catch(e){toast(e.message)}
+  }
+  async function cancelPartySize(){
+    try{if(state.pendingTable) await api("/api/customer/tables/release",{method:"POST",body:JSON.stringify({table_id:state.pendingTable.id})})}catch(_){ }
+    state.pendingTable=null;closeModal();loadCustomerTables();
+  }
+  async function confirmPartySize(event){
+    event.preventDefault(); const table=state.pendingTable; const partySize=Number($("party-size")?.value||0);
+    if(!table)return; if(!Number.isInteger(partySize)||partySize<1||partySize>Number(table.capacity||4))return toast(`จำนวนคนต้องอยู่ระหว่าง 1-${Number(table.capacity||4)} คน`);
+    try{const d=await api("/api/customer/tables/confirm",{method:"POST",body:JSON.stringify({table_id:table.id,party_size:partySize})});state.pendingTable=null;state.selectedTable=d.table;localStorage.setItem(tableKey(),JSON.stringify(state.selectedTable));closeModal();refreshNav();toast(`เลือกโต๊ะ ${d.table.table_number} สำหรับ ${partySize} คนแล้ว`);go("menu")}catch(e){toast(e.message)}
   }
   function reservationMinimumValue(){ const d=new Date(Date.now()+30*60*1000); const pad=n=>String(n).padStart(2,"0"); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
   function setReservationMinimum(){ const input=$("res-date"); if(input){input.min=reservationMinimumValue(); input.title="ต้องจองล่วงหน้าอย่างน้อย 30 นาที";} }
@@ -226,16 +254,19 @@ const App = (() => {
   async function loadCustomer(){
     if(!state.user)return; $("customer-name").textContent=state.user.name; $("customer-points").textContent=state.user.member_points||0; renderCart();
     try{
-      const d=await api(`/api/orders?table_id=${encodeURIComponent(selectedTable()?.id || "")}`); const active=d.orders.filter(o=>!['closed','merged'].includes(o.status)); state.hasActiveOrder=active.length>0; refreshNav();
+      const selected=selectedTable(); if(selected){const moves=await api("/api/customer/table-move-requests");const td=await api("/api/customer/tables");const completed=moves.requests.find(r=>r.status==="completed");if(completed){const moved=td.tables.find(t=>t.id===completed.new_table_id&&t.claimed_by===state.user.id);if(moved){state.selectedTable=moved;localStorage.setItem(tableKey(),JSON.stringify(moved));}}const live=td.tables.find(t=>t.id===state.selectedTable?.id);if(!live||live.status==="available"||live.claimed_by!==state.user.id){const had=state.hadActiveOrder;clearCustomerSessionData();state.hasActiveOrder=false;if(had){toast("บิลปิดแล้ว โต๊ะกลับมาว่าง");go("home");return;}return;}}
+      const d=await api(`/api/orders?table_id=${encodeURIComponent(selectedTable()?.id || "")}`); const active=d.orders.filter(o=>!['closed','merged'].includes(o.status)); state.hadActiveOrder=state.hasActiveOrder||active.length>0; state.hasActiveOrder=active.length>0; refreshNav();
       $("customer-orders").innerHTML=`<h3>รายการอาหารที่สั่ง</h3>`+renderCustomerOrders(d.orders);
-      if(active.length) $("customer-orders").insertAdjacentHTML("beforeend",`<div class="actions"><button class="primary" onclick="App.go('menu')">สั่งเมนูใหม่</button></div>`);
+      if(active.length) $("customer-orders").insertAdjacentHTML("beforeend",`<div class="actions"><button class="primary" onclick="App.go('menu')">สั่งเมนูใหม่</button><button class="secondary" onclick="App.requestSplitBill()">ขอแยกบิล</button></div>`);
     }catch(e){ $("customer-orders").innerHTML=`<p class="small">${escapeHtml(e.message)}</p>`; }
   }
   async function requestMoveTable(){
-    try{const d=await api("/api/customer/table-move-requests",{method:"POST",body:"{}"});toast(d.message||"ส่งคำขอย้ายโต๊ะให้ Staff แล้ว");}catch(e){toast(e.message)}
+    try{const d=await api("/api/customer/tables");const current=selectedTable()?.id;const free=d.tables.filter(t=>t.status==="available"&&t.id!==current);if(!free.length)return toast("ไม่มีโต๊ะว่างให้ย้าย");openModal(`<h2>ขอย้ายโต๊ะ</h2><p class="small">เลือกโต๊ะปลายทาง แล้วรอ Staff ยืนยัน</p><form onsubmit="App.submitMoveRequest(event)"><label>โต๊ะปลายทาง<select id="move-target">${free.map(t=>`<option value="${escapeAttr(t.id)}">โต๊ะ ${escapeHtml(t.table_number)}</option>`).join("")}</select></label><div class="actions"><button class="primary">ส่งคำขอ</button><button type="button" class="secondary" onclick="App.closeModal()">ยกเลิก</button></div></form>`)}catch(e){toast(e.message)}
   }
+  async function submitMoveRequest(e){e.preventDefault();try{const d=await api("/api/customer/table-move-requests",{method:"POST",body:JSON.stringify({new_table_id:$('move-target').value})});closeModal();toast(d.message||"ส่งคำขอย้ายโต๊ะให้ Staff แล้ว")}catch(e){toast(e.message)}}
+  async function requestSplitBill(){try{const d=await api("/api/customer/split-bill-requests",{method:"POST",body:JSON.stringify({table_id:selectedTable()?.id})});toast(d.message||"ส่งคำขอแยกบิลแล้ว")}catch(e){toast(e.message)}}
   async function requestBill(){
-    const o=(await api("/api/orders")).orders.find(x=>x.status!=="closed"&&x.status!=="merged"); if(!o)return toast("ยังไม่มีบิลที่เปิดอยู่");
+    const o=(await api(`/api/orders?table_id=${encodeURIComponent(selectedTable()?.id||"")}`)).orders.find(x=>x.status!=="closed"&&x.status!=="merged"); if(!o)return toast("ยังไม่มีบิลที่เปิดอยู่");
     try{
       const b=await api(`/api/orders/${o.id}/bill?discount=0`);
       const points=Number(b.customer_points ?? state.user?.member_points ?? 0); const maxUsable=Math.floor(points/100)*100;
@@ -297,13 +328,13 @@ const App = (() => {
       if (!staffState.tables.length) staffState.tables = (await api("/api/tables")).tables;
     } catch(e) { return toast(e.message); }
     const tables = staffState.tables.slice().sort((a, b) => String(a.table_number).localeCompare(String(b.table_number), undefined, {numeric: true}));
-    openModal(`<h2>จองโต๊ะให้ลูกค้า</h2><form onsubmit="App.saveStaffReserve(event)"><label>ชื่อลูกค้า<input id="sr-name" required></label><label>เบอร์โทร<input id="sr-phone" required></label><label>โต๊ะ<select id="sr-table">${tables.map(t => `<option value="${escapeAttr(t.table_number)}">โต๊ะ ${escapeHtml(t.table_number)}</option>`).join("")}</select></label><label>เวลา<input id="sr-date" type="time" required></label><div class="actions"><button class="primary">บันทึกการจอง</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form>`);
+    openModal(`<h2>จองโต๊ะให้ลูกค้า</h2><form onsubmit="App.saveStaffReserve(event)"><label>ชื่อลูกค้า<input id="sr-name" required></label><label>เบอร์โทร<input id="sr-phone" type="tel" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" minlength="10" required></label><label>จำนวนคน<input id="sr-party-size" type="number" min="1" required></label><label>โต๊ะ<select id="sr-table">${tables.map(t => `<option value="${escapeAttr(t.table_number)}">โต๊ะ ${escapeHtml(t.table_number)}</option>`).join("")}</select></label><label>เวลา<input id="sr-date" type="time" required></label><div class="actions"><button class="primary">บันทึกการจอง</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form>`);
   }
 
   async function saveStaffReserve(e) {
     e.preventDefault();
     try {
-      await api("/api/reservations", {method: "POST", body: JSON.stringify({customer_name: $("sr-name").value, phone: $("sr-phone").value, table_number: $("sr-table").value, datetime: $("sr-date").value})});
+      await api("/api/reservations", {method: "POST", body: JSON.stringify({customer_name: $("sr-name").value, phone: $("sr-phone").value, party_size: Number($("sr-party-size").value), table_number: $("sr-table").value, datetime: $("sr-date").value})});
       closeModal(); toast("บันทึกการจองสำเร็จ"); loadStaff();
     } catch(x) { toast(x.message); }
   }
@@ -392,13 +423,18 @@ const App = (() => {
         ? `${(order.items || []).length} รายการ · รวม <b>฿${Number(order.total || 0).toFixed(2)}</b><br>เปิดเมื่อ ${escapeHtml((order.created_at || "").slice(0, 16).replace("T", " "))}`
         : `ไม่มีออเดอร์`;
       const resInfo = resv.length ? `<br>📅 จอง ${resv.length} คิว (${escapeHtml(resv.map(r => r.customer_name + " " + String(r.datetime).slice(11, 16)).join(", "))})` : "";
-      const buttons = order ? `<button class="secondary" onclick="App.showMove('${tb.id}')">ย้ายโต๊ะ</button><button class="secondary" onclick="App.showMerge('${tb.id}')">รวมโต๊ะ</button><button class="secondary" onclick="App.showSplit('${tb.id}')">แยกบิล</button><button class="primary" onclick="App.showCheckout('${order.id}')">เช็คบิล</button>` : "";
-      return `<div class="table-card"><div class="top"><h3>โต๊ะ ${escapeHtml(tb.table_number)}</h3><span class="badge ${escapeHtml(tb.status)}">${escapeHtml(tb.status)}</span></div><div class="info">${info}${resInfo}</div>${select}<div class="actions">${buttons}</div></div>`;
+      const buttons = order ? `<button class="secondary" onclick="App.showMove('${tb.id}')">ย้ายโต๊ะ</button><button class="secondary" onclick="App.showMerge('${tb.id}')">รวมโต๊ะ</button>${order.split_requested?`<button class="secondary" onclick="App.splitByCustomer('${order.id}')">แยกบิลตาม Customer</button>`:""}<button class="primary" onclick="App.showCheckout('${order.id}')">เช็คบิล</button>` : "";
+      const capacityEditor = state.user?.role === "admin" ? `<label class="small">รับได้สูงสุด<input type="number" min="1" max="100" value="${Number(tb.capacity||4)}" onchange="App.setTableCapacity('${tb.id}',this.value)"></label>` : `<div class="small">รองรับสูงสุด ${Number(tb.capacity||4)} คน</div>`;
+      return `<div class="table-card"><div class="top"><h3>โต๊ะ ${escapeHtml(tb.table_number)}</h3><span class="badge ${escapeHtml(tb.status)}">${escapeHtml(tb.status)}</span></div><div class="info">${info}${resInfo}</div>${capacityEditor}${select}<div class="actions">${buttons}</div></div>`;
     }).join("") || `<div class="list-card">ยังไม่มีโต๊ะ</div>`;
   }
 
   async function setTableStatus(id, status) {
     try { await api(`/api/tables/${id}`, {method: "PATCH", body: JSON.stringify({status})}); toast("อัปเดตสถานะโต๊ะแล้ว"); loadTables(); }
+    catch(e) { toast(e.message); loadTables(); }
+  }
+  async function setTableCapacity(id, capacity) {
+    try { await api(`/api/tables/${id}`, {method:"PATCH",body:JSON.stringify({capacity:Number(capacity)})}); toast("บันทึกความจุโต๊ะแล้ว"); loadTables(); }
     catch(e) { toast(e.message); loadTables(); }
   }
 
@@ -449,7 +485,7 @@ const App = (() => {
 
   function renderMoveRequests(list){
     const el=$("staff-move-requests"); if(!el)return;
-    el.innerHTML=list.map(x=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(x.table_number||"-")}</b><div class="small">${escapeHtml(x.customer_name||"ลูกค้า")} · ${escapeHtml(x.created_at||"")}</div></div><div class="row-actions"><span class="badge">${escapeHtml(x.status)}</span>${x.status==="pending"?`<button class="secondary" onclick="App.updateMoveRequest('${x.id}','acknowledged')">รับทราบ</button>`:""}</div></div>`).join("")||`<p class="small">ไม่มีคำขอย้ายโต๊ะ</p>`;
+    el.innerHTML=list.map(x=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(x.table_number||"-")}</b><div class="small">${escapeHtml(x.customer_name||"ลูกค้า")} · ไปโต๊ะ ${escapeHtml(x.new_table_number||"-")} · ${escapeHtml(x.created_at||"")}</div></div><div class="row-actions"><span class="badge">${escapeHtml(x.status)}</span>${x.status==="pending"?`<button class="secondary" onclick="App.updateMoveRequest('${x.id}','acknowledged')">รับทราบ</button>`:""}${x.status!=="completed"&&x.status!=="cancelled"?`<button class="primary" onclick="App.updateMoveRequest('${x.id}','completed')">ยืนยันย้ายจริง</button>`:""}</div></div>`).join("")||`<p class="small">ไม่มีคำขอย้ายโต๊ะ</p>`;
   }
   async function updateMoveRequest(id,status){try{await api(`/api/table-move-requests/${id}`,{method:"PATCH",body:JSON.stringify({status})});toast("อัปเดตคำขอย้ายโต๊ะแล้ว");loadStaff()}catch(e){toast(e.message)}}
   async function loadStaff() {
@@ -468,11 +504,12 @@ const App = (() => {
       staffState.tables = t.tables; renderStaffReservations(r.reservations); renderMoveRequests(m.requests);
       $("staff-orders").innerHTML = o.orders.slice().sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))).map(x => {
         const open = !["closed", "merged"].includes(x.status);
-        return `<div class="table-row"><div><b>โต๊ะ ${escapeHtml(x.table_number||"-")}</b><div class="small">Total ฿${Number(x.total||0).toFixed(2)}</div>${open ? `<div class="row-actions"><button class="primary" onclick="App.showCheckout('${x.id}')">เช็คบิล</button></div>` : ""}</div><span class="badge">${escapeHtml(x.status)}</span></div>`;
+        return `<div class="table-row"><div><b>โต๊ะ ${escapeHtml(x.table_number||"-")}</b><div class="small">Total ฿${Number(x.total||0).toFixed(2)}</div>${open ? `<div class="row-actions"><button class="primary" onclick="App.showCheckout('${x.id}')">เช็คบิล</button>${x.split_requested?`<button class="secondary" onclick="App.splitByCustomer('${x.id}')">แยกบิลตาม Customer</button>`:""}</div>` : ""}</div><span class="badge">${escapeHtml(x.status)}</span></div>`;
       }).join("") || `<p class="small">ไม่มีออเดอร์</p>`;
     } catch(e) { toast(e.message); }
   }
 
+  async function splitByCustomer(orderId){try{await api("/api/orders/split-by-customer",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("แยกบิลตาม Customer สำเร็จ รายการ Counter อยู่บิลกลาง");loadStaff()}catch(e){toast(e.message)}}
   async function updateKitchen(id,status) {
     try { await api(`/api/kitchen/${id}`,{method:"PATCH",body:JSON.stringify({status})}); toast("อัปเดตครัวแล้ว"); }
     catch(e){toast(e.message)}
@@ -520,5 +557,5 @@ const App = (() => {
   function escapeAttr(v){return escapeHtml(v)}
 
   restore();
-  return {go,authMode,submitAuth,logout,loadMenus,reserve,loadReservations,loadCustomer,requestMoveTable,updateMoveRequest,loadDashboard,cartAdd,clearCart,submitCart,requestBill,callStaff,loadCustomerTables,claimTable,addConfiguredToCart,loadStaff,loadTables,showCheckout,previewBill,doCheckout,resAction,showStaffReserve,saveStaffReserve,loadPos,renderPos,posChoose,posAddConfigured,posAdd,posClear,posSubmit,setTableStatus,showMove,doMove,showMerge,doMerge,showSplit,doSplit,updateKitchen,adminPage,showMenuForm,addOptionGroup,addOptionValue,saveMenu,deleteMenu,showStaffForm,saveStaff,toggleUser,closeModal,quickOrder};
+  return {go,authMode,submitAuth,logout,loadMenus,reserve,loadReservations,loadCustomer,requestMoveTable,submitMoveRequest,requestSplitBill,updateMoveRequest,loadDashboard,cartAdd,clearCart,submitCart,requestBill,callStaff,loadCustomerTables,claimTable,confirmPartySize,cancelPartySize,addConfiguredToCart,loadStaff,loadTables,showCheckout,previewBill,doCheckout,splitByCustomer,resAction,showStaffReserve,saveStaffReserve,loadPos,renderPos,posChoose,posAddConfigured,posAdd,posClear,posSubmit,setTableStatus,setTableCapacity,showMove,doMove,showMerge,doMerge,showSplit,doSplit,updateKitchen,adminPage,showMenuForm,addOptionGroup,addOptionValue,saveMenu,deleteMenu,showStaffForm,saveStaff,toggleUser,closeModal,quickOrder};
 })();

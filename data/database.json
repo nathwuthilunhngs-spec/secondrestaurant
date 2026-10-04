@@ -9,23 +9,14 @@
       "active": true,
       "password_hash": "pbkdf2_sha256$120000$360800526b0cd3ee3d7dfa36638b0b3f$57ac8873de5d31cd5fa74cc99e467bfbe407e8e53a58d36f284ad917db27230a"
     },
-    "local_fe5d5a1d4e554206": {
-      "id": "local_fe5d5a1d4e554206",
+    "local_05e3b6f84fe14049": {
+      "id": "local_05e3b6f84fe14049",
       "email": "test@gmail.com",
       "name": "test@gmail.com",
       "role": "customer",
-      "member_points": 90,
-      "active": true,
-      "password_hash": "pbkdf2_sha256$120000$5019a1f4e82092a15672de9925fb7cfa$1c34eb0eb13c7d35b97a5bfd675d7b6a9bd1cfa2ae03f3a0d77e931a0b5b100b"
-    },
-    "local_5c53b792445243fb": {
-      "id": "local_5c53b792445243fb",
-      "email": "staff@gmail.com",
-      "name": "staff@gmail.com",
-      "role": "staff",
       "member_points": 0,
       "active": true,
-      "password_hash": "pbkdf2_sha256$120000$0a05b24afcf4f13231aa0d28f16caf3c$d2d79fa3bdeac97f103609d9cd7d8c2abef1d6d25b635b53aa3de9e16f65ffa3"
+      "password_hash": "pbkdf2_sha256$120000$8fc80aa038c3a9f3fe8ec52047c20a6b$616559a620ea70f7e5004433fea08a130c74e614c537637c243af4a0b4a608a7"
     }
   },
   "menus": {
@@ -87,9 +78,9 @@
       "id": "menu_007",
       "name": "Caesar Salad",
       "category": "Salad",
-      "price": 149.0,
+      "price": 149,
       "image_url": "",
-      "is_out_of_stock": true,
+      "is_out_of_stock": false,
       "options": {}
     },
     "menu_008": {
@@ -126,453 +117,85 @@
       "table_number": "01",
       "status": "occupied",
       "current_order_id": null,
-      "claimed_by": "local_fe5d5a1d4e554206"
+      "capacity": 4,
+      "claimed_by": "local_05e3b6f84fe14049",
+      "party_size": 4
     },
     "table_02": {
       "id": "table_02",
       "table_number": "02",
       "status": "available",
       "current_order_id": null,
-      "claimed_by": null
+      "capacity": 4
     },
     "table_03": {
       "id": "table_03",
       "table_number": "03",
       "status": "available",
       "current_order_id": null,
-      "claimed_by": "local_fe5d5a1d4e554206"
+      "capacity": 4
     },
     "table_04": {
       "id": "table_04",
       "table_number": "04",
       "status": "available",
       "current_order_id": null,
-      "claimed_by": "local_fe5d5a1d4e554206"
+      "capacity": 4
     },
     "table_05": {
       "id": "table_05",
       "table_number": "05",
       "status": "available",
       "current_order_id": null,
-      "claimed_by": null
+      "capacity": 4
     },
     "table_06": {
       "id": "table_06",
       "table_number": "06",
       "status": "available",
       "current_order_id": null,
-      "claimed_by": null
+      "capacity": 4
     }
   },
   "reservations": {
-    "res_b3fa1926f454": {
-      "id": "res_b3fa1926f454",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "customer_name": "ะดดเ้",
-      "phone": "99999",
+    "res_268e2a37ea56": {
+      "id": "res_268e2a37ea56",
+      "customer_id": "local_05e3b6f84fe14049",
+      "customer_name": "adsadadas",
+      "phone": "0000000000",
       "table_number": "01",
-      "datetime": "04:39",
-      "status": "expired",
+      "party_size": null,
+      "datetime": "19:46",
+      "status": "waiting",
       "source": "customer",
-      "created_by": "local_fe5d5a1d4e554206",
-      "created_at": "2026-10-03T19:39:48.573930+00:00",
-      "expired_at": "2026-10-04T05:02:07.338816+00:00"
+      "created_by": "local_05e3b6f84fe14049",
+      "created_at": "2026-10-04T12:15:55.858056+00:00"
     }
   },
-  "orders": {
-    "order_b1bc391e8dee": {
-      "id": "order_b1bc391e8dee",
-      "table_id": "table_01",
-      "table_number": "01",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "items": [
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        },
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        }
-      ],
-      "subtotal": 298.0,
-      "discount": 0.0,
-      "service_charge": 29.8,
-      "tax": 22.95,
-      "total": 350.75,
-      "status": "closed",
-      "created_by": "local_fe5d5a1d4e554206",
-      "created_at": "2026-10-04T05:02:26.014137+00:00",
-      "source": "qr",
-      "manual_discount": 0.0,
-      "points_used": 0,
-      "points_discount": 0,
-      "earned_points": 29,
-      "closed_at": "2026-10-04T05:47:12.233597+00:00",
-      "closed_by": "local_5c53b792445243fb"
-    },
-    "order_aa04cf8644ee": {
-      "id": "order_aa04cf8644ee",
-      "table_id": "table_02",
-      "table_number": "02",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "items": [
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        }
-      ],
-      "subtotal": 149.0,
-      "discount": 0.0,
-      "service_charge": 14.9,
-      "tax": 11.47,
-      "total": 175.37,
-      "status": "closed",
-      "created_by": "local_fe5d5a1d4e554206",
-      "created_at": "2026-10-04T05:20:35.309512+00:00",
-      "source": "qr",
-      "manual_discount": 0.0,
-      "points_used": 0,
-      "points_discount": 0,
-      "earned_points": 14,
-      "closed_at": "2026-10-04T05:47:15.525701+00:00",
-      "closed_by": "local_5c53b792445243fb"
-    },
-    "order_ed8e0825f10a": {
-      "id": "order_ed8e0825f10a",
-      "table_id": "table_05",
-      "table_number": "05",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "items": [
-        {
-          "menu_id": "menu_001",
-          "name": "Spaghetti Carbonara",
-          "unit_price": 189.0,
-          "base_price": 189.0,
-          "quantity": 1,
-          "options": {}
-        }
-      ],
-      "subtotal": 189.0,
-      "discount": 0.0,
-      "service_charge": 18.9,
-      "tax": 14.55,
-      "total": 222.45,
-      "status": "closed",
-      "created_by": "local_fe5d5a1d4e554206",
-      "created_at": "2026-10-04T05:36:24.182832+00:00",
-      "source": "qr",
-      "manual_discount": 0.0,
-      "points_used": 0,
-      "points_discount": 0,
-      "earned_points": 18,
-      "closed_at": "2026-10-04T05:47:01.317016+00:00",
-      "closed_by": "local_5c53b792445243fb"
-    },
-    "order_c4e2f7e49bdd": {
-      "id": "order_c4e2f7e49bdd",
-      "table_id": "table_06",
-      "table_number": "06",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "items": [
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        },
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {}
-        }
-      ],
-      "subtotal": 298.0,
-      "discount": 0.0,
-      "service_charge": 29.8,
-      "tax": 22.95,
-      "total": 350.75,
-      "status": "closed",
-      "created_by": "local_fe5d5a1d4e554206",
-      "created_at": "2026-10-04T05:42:18.176348+00:00",
-      "source": "qr",
-      "manual_discount": 0.0,
-      "points_used": 0,
-      "points_discount": 0,
-      "earned_points": 29,
-      "closed_at": "2026-10-04T05:47:04.599368+00:00",
-      "closed_by": "local_5c53b792445243fb"
-    }
-  },
-  "kitchen": {
-    "kit_3f5bc5b1c9b5": {
-      "id": "kit_3f5bc5b1c9b5",
-      "order_id": "order_b1bc391e8dee",
-      "order_item_id": "order_b1bc391e8dee_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "01",
-      "quantity": 1,
-      "status": "done",
-      "timestamp": "2026-10-04T05:02:26.017979+00:00",
-      "updated_at": "2026-10-04T05:55:11.798493+00:00"
-    },
-    "kit_78b3551347a6": {
-      "id": "kit_78b3551347a6",
-      "order_id": "order_b1bc391e8dee",
-      "order_item_id": "order_b1bc391e8dee_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "01",
-      "quantity": 1,
-      "status": "cooking",
-      "timestamp": "2026-10-04T05:02:56.227617+00:00",
-      "updated_at": "2026-10-04T05:47:48.226154+00:00"
-    },
-    "kit_9c6cb2fca272": {
-      "id": "kit_9c6cb2fca272",
-      "order_id": "order_aa04cf8644ee",
-      "order_item_id": "order_aa04cf8644ee_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "02",
-      "quantity": 1,
-      "status": "cooking",
-      "timestamp": "2026-10-04T05:20:35.315470+00:00",
-      "updated_at": "2026-10-04T05:47:49.412118+00:00"
-    },
-    "kit_448b261e61a7": {
-      "id": "kit_448b261e61a7",
-      "order_id": "order_ed8e0825f10a",
-      "order_item_id": "order_ed8e0825f10a_menu_001",
-      "menu_name": "Spaghetti Carbonara",
-      "options": {},
-      "table_number": "05",
-      "quantity": 1,
-      "status": "cooking",
-      "timestamp": "2026-10-04T05:36:24.188876+00:00",
-      "updated_at": "2026-10-04T05:47:50.521369+00:00"
-    },
-    "kit_a8ee65de82c5": {
-      "id": "kit_a8ee65de82c5",
-      "order_id": "order_c4e2f7e49bdd",
-      "order_item_id": "order_c4e2f7e49bdd_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "06",
-      "quantity": 1,
-      "status": "cooking",
-      "timestamp": "2026-10-04T05:42:18.183413+00:00",
-      "updated_at": "2026-10-04T05:47:53.026042+00:00"
-    },
-    "kit_72f5dbe55293": {
-      "id": "kit_72f5dbe55293",
-      "order_id": "order_c4e2f7e49bdd",
-      "order_item_id": "order_c4e2f7e49bdd_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "06",
-      "quantity": 1,
-      "status": "cooking",
-      "timestamp": "2026-10-04T05:43:05.203410+00:00",
-      "updated_at": "2026-10-04T05:47:57.421767+00:00"
-    }
-  },
+  "orders": {},
+  "kitchen": {},
   "audit_logs": {
-    "4feac3c7412d4b4db0ad": {
-      "id": "log_fb9f77e7b6bb",
-      "user_id": "local_fe5d5a1d4e554206",
+    "bca45c1d229c431e9127": {
+      "id": "log_fcf51e824a10",
+      "user_id": "local_05e3b6f84fe14049",
       "user_name": "test@gmail.com",
       "role": "customer",
       "action": "CREATE_RESERVATION",
       "target_type": "reservation",
-      "target_id": "res_b3fa1926f454",
-      "detail": "table=01 at=04:39",
-      "timestamp": "2026-10-03T19:39:48.575557+00:00"
+      "target_id": "res_268e2a37ea56",
+      "detail": "table=01 at=19:46",
+      "timestamp": "2026-10-04T12:15:55.860264+00:00"
     },
-    "e3d21790fe7d4550a65d": {
-      "id": "log_06f132e3edbb",
-      "user_id": "local_fe5d5a1d4e554206",
+    "9fb9c253bf244b7ba426": {
+      "id": "log_cc0362712bc3",
+      "user_id": "local_05e3b6f84fe14049",
       "user_name": "test@gmail.com",
       "role": "customer",
       "action": "CLAIM_TABLE",
       "target_type": "table",
       "target_id": "table_01",
       "detail": "",
-      "timestamp": "2026-10-03T19:40:18.075423+00:00"
-    },
-    "0aa096dd374c46acaabe": {
-      "id": "log_57dea4a7959a",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_01",
-      "detail": "",
-      "timestamp": "2026-10-04T05:02:11.381553+00:00"
-    },
-    "2a3d037d15584724af50": {
-      "id": "log_178551e0d74a",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_02",
-      "detail": "",
-      "timestamp": "2026-10-04T05:20:28.367226+00:00"
-    },
-    "9e060fb6bfb84229b889": {
-      "id": "log_d963ade4a4d7",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_03",
-      "detail": "",
-      "timestamp": "2026-10-04T05:22:16.853475+00:00"
-    },
-    "c7ca55f46b564f0389ef": {
-      "id": "log_96b7b65be6c6",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_04",
-      "detail": "",
-      "timestamp": "2026-10-04T05:27:40.500760+00:00"
-    },
-    "bd9b797346774e98a104": {
-      "id": "log_3111b7dffab9",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_05",
-      "detail": "",
-      "timestamp": "2026-10-04T05:35:41.736243+00:00"
-    },
-    "7f1087cefdaf402aa6e7": {
-      "id": "log_b2d6dc65814b",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_06",
-      "detail": "",
-      "timestamp": "2026-10-04T05:41:49.476215+00:00"
-    },
-    "74ce41c9376940c3aee4": {
-      "id": "log_9ee02fb16382",
-      "user_id": "local_fcd87db8733a4a76",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "CREATE_STAFF",
-      "target_type": "user",
-      "target_id": "local_5c53b792445243fb",
-      "detail": "staff@gmail.com",
-      "timestamp": "2026-10-04T05:46:24.742670+00:00"
-    },
-    "9afd1176ce7e42a6b995": {
-      "id": "log_fcb877c1aec3",
-      "user_id": "local_5c53b792445243fb",
-      "user_name": "staff@gmail.com",
-      "role": "staff",
-      "action": "CHECKOUT_ORDER",
-      "target_type": "order",
-      "target_id": "order_ed8e0825f10a",
-      "detail": "222.45",
-      "timestamp": "2026-10-04T05:47:01.326925+00:00"
-    },
-    "6219b63ece414bd1ab41": {
-      "id": "log_293199ab92ce",
-      "user_id": "local_5c53b792445243fb",
-      "user_name": "staff@gmail.com",
-      "role": "staff",
-      "action": "CHECKOUT_ORDER",
-      "target_type": "order",
-      "target_id": "order_c4e2f7e49bdd",
-      "detail": "350.75",
-      "timestamp": "2026-10-04T05:47:04.609378+00:00"
-    },
-    "a59dc2127cc14748b24f": {
-      "id": "log_bea7b8c17a71",
-      "user_id": "local_5c53b792445243fb",
-      "user_name": "staff@gmail.com",
-      "role": "staff",
-      "action": "CHECKOUT_ORDER",
-      "target_type": "order",
-      "target_id": "order_b1bc391e8dee",
-      "detail": "350.75",
-      "timestamp": "2026-10-04T05:47:12.244703+00:00"
-    },
-    "713fef463b434d23a59b": {
-      "id": "log_b10c69c7372e",
-      "user_id": "local_5c53b792445243fb",
-      "user_name": "staff@gmail.com",
-      "role": "staff",
-      "action": "CHECKOUT_ORDER",
-      "target_type": "order",
-      "target_id": "order_aa04cf8644ee",
-      "detail": "175.37",
-      "timestamp": "2026-10-04T05:47:15.536783+00:00"
-    },
-    "050a3c7a28e241ef852e": {
-      "id": "log_4c943f9c018a",
-      "user_id": "local_fe5d5a1d4e554206",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_01",
-      "detail": "",
-      "timestamp": "2026-10-04T06:03:58.088971+00:00"
-    },
-    "ca00c144b8884cb1917f": {
-      "id": "log_071f6f9640fe",
-      "user_id": "local_fcd87db8733a4a76",
-      "user_name": "itailaew Admin",
-      "role": "admin",
-      "action": "UPDATE_MENU",
-      "target_type": "menu",
-      "target_id": "menu_007",
-      "detail": "Caesar Salad",
-      "timestamp": "2026-10-04T06:07:37.495011+00:00"
-    }
-  },
-  "table_move_requests": {
-    "move_d175467f9296": {
-      "id": "move_d175467f9296",
-      "customer_id": "local_fe5d5a1d4e554206",
-      "customer_name": "test@gmail.com",
-      "table_id": "table_01",
-      "table_number": "01",
-      "status": "acknowledged",
-      "created_at": "2026-10-04T05:36:26.327982+00:00",
-      "updated_at": "2026-10-04T05:46:37.260683+00:00",
-      "updated_by": "local_5c53b792445243fb"
+      "timestamp": "2026-10-04T12:16:05.008138+00:00"
     }
   }
 }

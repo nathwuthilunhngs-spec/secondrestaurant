@@ -15,7 +15,8 @@ except ImportError:
     from config import FIREBASE_API_KEY, ALLOWED_ROLES, LOCAL_AUTH_SECRET, is_local_mode
     from firebase import get, put, patch, post, FirebaseError
 
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+ALLOWED_EMAIL_DOMAINS = {"gmail.com", "outlook.com", "hotmail.com", "kkumail.com"}
+EMAIL_RE = re.compile(r"^[^@\s]+@([^@\s]+)$")
 
 
 class AuthError(Exception):
@@ -182,7 +183,10 @@ def require_role(profile, *roles):
 
 
 def safe_email(email):
-    return isinstance(email, str) and bool(EMAIL_RE.match(email.strip().lower()))
+    if not isinstance(email, str):
+        return False
+    match = EMAIL_RE.match(email.strip().lower())
+    return bool(match and match.group(1) in ALLOWED_EMAIL_DOMAINS)
 
 
 def validate_password(password):
