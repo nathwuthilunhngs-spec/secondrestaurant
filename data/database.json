@@ -9,14 +9,14 @@
       "active": true,
       "password_hash": "pbkdf2_sha256$120000$360800526b0cd3ee3d7dfa36638b0b3f$57ac8873de5d31cd5fa74cc99e467bfbe407e8e53a58d36f284ad917db27230a"
     },
-    "local_05e3b6f84fe14049": {
-      "id": "local_05e3b6f84fe14049",
-      "email": "test@gmail.com",
-      "name": "test@gmail.com",
+    "local_789bb87b07dd4ef3": {
+      "id": "local_789bb87b07dd4ef3",
+      "email": "test1@gmail.com",
+      "name": "test1@gmail.com",
       "role": "customer",
       "member_points": 0,
       "active": true,
-      "password_hash": "pbkdf2_sha256$120000$8fc80aa038c3a9f3fe8ec52047c20a6b$616559a620ea70f7e5004433fea08a130c74e614c537637c243af4a0b4a608a7"
+      "password_hash": "pbkdf2_sha256$120000$92f72e3560b5458be82215aa8d5d9b57$c845259beefbc1108f06b1aa5f25e6cf6021a21f70db2ffa1042b44e315e220b"
     }
   },
   "menus": {
@@ -116,10 +116,14 @@
       "id": "table_01",
       "table_number": "01",
       "status": "occupied",
-      "current_order_id": null,
+      "current_order_id": "order_2d05ed04c25d",
       "capacity": 4,
-      "claimed_by": "local_05e3b6f84fe14049",
-      "party_size": 4
+      "claimed_by": "local_789bb87b07dd4ef3",
+      "occupant_ids": [
+        "local_789bb87b07dd4ef3"
+      ],
+      "party_size": 1,
+      "current_round_id": "order_2d05ed04c25d"
     },
     "table_02": {
       "id": "table_02",
@@ -157,45 +161,61 @@
       "capacity": 4
     }
   },
-  "reservations": {
-    "res_268e2a37ea56": {
-      "id": "res_268e2a37ea56",
-      "customer_id": "local_05e3b6f84fe14049",
-      "customer_name": "adsadadas",
-      "phone": "0000000000",
+  "reservations": {},
+  "orders": {
+    "order_2d05ed04c25d": {
+      "id": "order_2d05ed04c25d",
+      "table_id": "table_01",
       "table_number": "01",
-      "party_size": null,
-      "datetime": "19:46",
-      "status": "waiting",
-      "source": "customer",
-      "created_by": "local_05e3b6f84fe14049",
-      "created_at": "2026-10-04T12:15:55.858056+00:00"
+      "customer_id": "local_789bb87b07dd4ef3",
+      "party_size": 1,
+      "items": [
+        {
+          "menu_id": "menu_007",
+          "name": "Caesar Salad",
+          "unit_price": 149.0,
+          "base_price": 149.0,
+          "quantity": 1,
+          "options": {},
+          "customer_id": "local_789bb87b07dd4ef3"
+        }
+      ],
+      "subtotal": 149.0,
+      "discount": 0.0,
+      "service_charge": 14.9,
+      "tax": 11.47,
+      "total": 175.37,
+      "status": "open",
+      "created_by": "local_789bb87b07dd4ef3",
+      "created_at": "2026-10-04T13:46:07.771164+00:00",
+      "source": "qr",
+      "round_id": "order_2d05ed04c25d"
     }
   },
-  "orders": {},
-  "kitchen": {},
+  "kitchen": {
+    "kit_94f98f31c5f4": {
+      "id": "kit_94f98f31c5f4",
+      "order_id": "order_2d05ed04c25d",
+      "order_item_id": "order_2d05ed04c25d_menu_007",
+      "menu_name": "Caesar Salad",
+      "options": {},
+      "table_number": "01",
+      "quantity": 1,
+      "status": "pending",
+      "timestamp": "2026-10-04T13:46:07.777402+00:00"
+    }
+  },
   "audit_logs": {
-    "bca45c1d229c431e9127": {
-      "id": "log_fcf51e824a10",
-      "user_id": "local_05e3b6f84fe14049",
-      "user_name": "test@gmail.com",
-      "role": "customer",
-      "action": "CREATE_RESERVATION",
-      "target_type": "reservation",
-      "target_id": "res_268e2a37ea56",
-      "detail": "table=01 at=19:46",
-      "timestamp": "2026-10-04T12:15:55.860264+00:00"
-    },
-    "9fb9c253bf244b7ba426": {
-      "id": "log_cc0362712bc3",
-      "user_id": "local_05e3b6f84fe14049",
-      "user_name": "test@gmail.com",
+    "9b7c478a23914669b7f2": {
+      "id": "log_70eb7418d2b6",
+      "user_id": "local_789bb87b07dd4ef3",
+      "user_name": "test1@gmail.com",
       "role": "customer",
       "action": "CLAIM_TABLE",
       "target_type": "table",
       "target_id": "table_01",
       "detail": "",
-      "timestamp": "2026-10-04T12:16:05.008138+00:00"
+      "timestamp": "2026-10-04T13:45:59.367223+00:00"
     }
   }
 }
