@@ -194,6 +194,8 @@ def validate_password(password):
 
 
 def create_profile(uid, email, name, role="customer", password=None):
+    if not re.fullmatch(r"[A-Za-z\u0E00-\u0E7F]+(?: +[A-Za-z\u0E00-\u0E7F]+)*", str(name or "").strip()):
+        raise AuthError("ชื่อใช้ได้เฉพาะตัวอักษรไทย/อังกฤษและเว้นวรรค")
     if role not in ALLOWED_ROLES:
         raise AuthError("Role ไม่ถูกต้อง")
     profile = {

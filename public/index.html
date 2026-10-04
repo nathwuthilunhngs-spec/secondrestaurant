@@ -52,7 +52,7 @@
 </section>
 
 <section id="menu" class="page">
-  <div class="section-head"><div><span class="eyebrow">OUR MENU</span><h2>Italian favourites</h2></div><div class="actions" style="margin:0"><button id="customer-orders-back" class="secondary hidden" onclick="App.go('customer')">กลับรายการอาหารที่สั่ง</button><div class="filters"><input id="menu-search" placeholder="ค้นหาเมนู..." oninput="App.loadMenus()"><select id="menu-sort" onchange="App.loadMenus()"><option value="name">ชื่อ</option><option value="price_asc">ราคาต่ำ→สูง</option><option value="price_desc">ราคาสูง→ต่ำ</option></select></div></div></div>
+  <div class="section-head"><div><span class="eyebrow">OUR MENU</span><h2>Italian favourites</h2></div><div class="actions" style="margin:0"><button id="customer-orders-back" class="secondary hidden" onclick="App.go('customer')">กลับรายการอาหารที่สั่ง</button><div class="filters"><input id="menu-search" placeholder="ค้นหาเมนู..." oninput="App.loadMenus()"><select id="menu-category" onchange="App.loadMenus()"><option value="">ทุกประเภท</option><option value="อาหาร">อาหาร</option><option value="ของหวาน">ของหวาน</option><option value="เครื่องดื่ม">เครื่องดื่ม</option></select><select id="menu-sort" onchange="App.loadMenus()"><option value="name">ชื่อ</option><option value="price_asc">ราคาต่ำ→สูง</option><option value="price_desc">ราคาสูง→ต่ำ</option></select></div></div></div>
   <div id="qr-banner" class="list-card hidden"></div><div id="menu-grid" class="menu-grid"></div><div id="menu-pages" class="pagination"></div>
 </section>
 
@@ -108,7 +108,7 @@
   <div class="dashboard-head"><div><span class="eyebrow">itailaew STAFF</span><h2>Front of House</h2></div></div>
   <div class="staff-grid">
     <div class="list-card"><h3>Tables</h3><div id="tables-list"></div></div>
-    <div class="list-card"><h3>Kitchen Display <small>auto refresh 3s</small></h3><div id="kitchen-list" class="kitchen-list"></div></div>
+    <div id="staff-notifications" class="list-card staff-notifications"><h3>การแจ้งเตือน</h3><div>กำลังโหลด...</div></div><div class="list-card"><h3>Kitchen Display <small>auto refresh 3s</small></h3><div id="kitchen-list" class="kitchen-list"></div></div>
   </div>
   <div class="list-card"><div class="section-head" style="margin:0 0 10px"><h3 style="margin:0">Reservations & Queue</h3><button class="primary" onclick="App.showStaffReserve()">+ จองให้ลูกค้า</button></div><div id="staff-reservations"></div></div>
   <div class="list-card"><h3>คำขอย้ายโต๊ะ</h3><div id="staff-move-requests"></div></div>

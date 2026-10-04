@@ -238,8 +238,9 @@ const App = (() => {
     if (!state.user || state.user.role !== "customer") return;
     try {
       const data = await api("/api/reservations");
-      const list = data.reservations.slice().sort((a, b) => String(b.datetime).localeCompare(String(a.datetime)));
-      $("my-reservations").innerHTML = list.map(r=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(r.table_number)}</b><div class="small">${escapeHtml(String(r.datetime).replace(/^.*T/, "").slice(0,5))} · ${escapeHtml(r.customer_name)}</div></div>${resBadge(r.status)}</div>`).join("") || `<p class="small">ยังไม่มีรายการ</p>`;
+      const today = new Date().toISOString().slice(0,10);
+      const list = data.reservations.filter(r=>String(r.datetime||"").slice(0,10)===today).sort((a, b) => String(a.datetime).localeCompare(String(b.datetime)));
+      $("my-reservations").innerHTML = `<h3>ปฏิทินการจองของฉันวันนี้</h3>` + (list.map(r=>`<div class="table-row"><div><b>${escapeHtml(String(r.datetime).slice(11,16))} · โต๊ะ ${escapeHtml(r.table_number)}</b><div class="small">${escapeHtml(r.customer_name)} · ${escapeHtml(r.phone||"")}</div></div>${resBadge(r.status)}</div>`).join("") || `<p class="small">วันนี้ยังไม่มีรายการจอง</p>`);
     } catch(e) { toast(e.message); }
   }
 
@@ -491,7 +492,7 @@ const App = (() => {
   async function updateMoveRequest(id,status){try{await api(`/api/table-move-requests/${id}`,{method:"PATCH",body:JSON.stringify({status})});toast("อัปเดตคำขอย้ายโต๊ะแล้ว");loadStaff()}catch(e){toast(e.message)}}
   async function loadStaff() {
     try {
-      const [t,k,r,o,m] = await Promise.all([api("/api/tables"),api("/api/kitchen"),api("/api/reservations"),api("/api/orders"),api("/api/table-move-requests")]);
+      const [t,k,r,o,m,n] = await Promise.all([api("/api/tables"),api("/api/kitchen"),api("/api/reservations"),api("/api/orders"),api("/api/table-move-requests"),api("/api/notifications")]);
       $("tables-list").innerHTML = t.tables.map(x=>`<div class="table-row"><div><b>โต๊ะ ${escapeHtml(x.table_number)}</b></div><span class="badge ${x.status}">${escapeHtml(x.status)}</span></div>`).join("");
       const kitchenItems = k.items.slice().sort((a,b) => {
         const rank = x => x.status === "done" ? 1 : 0;
@@ -501,7 +502,9 @@ const App = (() => {
         const timeB = b.status === "done" ? (b.updated_at || b.timestamp || "") : (b.timestamp || "");
         return String(timeA).localeCompare(String(timeB));
       });
-      $("kitchen-list").innerHTML = kitchenItems.map(x=>`<div class="table-row"><div><b>${escapeHtml(x.menu_name)}</b><div class="small">โต๊ะ ${escapeHtml(x.table_number)} × ${x.quantity}</div></div><select onchange="App.updateKitchen('${x.id}',this.value)"><option ${x.status==="pending"?"selected":""}>pending</option><option ${x.status==="cooking"?"selected":""}>cooking</option><option ${x.status==="done"?"selected":""}>done</option></select></div>`).join("") || `<p class="small">ยังไม่มีออเดอร์เข้าครัว</p>`;
+      const groups = kitchenItems.reduce((acc,x)=>{(acc[x.order_id] ||= []).push(x);return acc;},{});
+      $("kitchen-list").innerHTML = Object.entries(groups).map(([orderId,items])=>`<section class="kitchen-bill"><div class="kitchen-bill-head"><b>บิล ${escapeHtml(orderId)} · โต๊ะ ${escapeHtml(items[0].table_number||"-")}</b><span class="small">${escapeHtml(items[0].timestamp||"")}</span></div>${items.map(x=>`<div class="table-row"><div><b>${escapeHtml(x.menu_name)}</b><div class="small">× ${x.quantity}</div></div><select onchange="App.updateKitchen('${x.id}',this.value)"><option ${x.status==="pending"?"selected":""}>pending</option><option ${x.status==="cooking"?"selected":""}>cooking</option><option ${x.status==="done"?"selected":""}>done</option></select></div>`).join("")}</section>`).join("") || `<p class="small">ยังไม่มีออเดอร์เข้าครัว</p>`;
+      $("staff-notifications").innerHTML = `<h3>การแจ้งเตือน</h3>` + ((n.notifications||[]).map(x=>`<div class="table-row"><div><b>${escapeHtml(x.title||"")}</b><div class="small">${escapeHtml(x.detail||"")}</div></div><span class="small">${escapeHtml(String(x.created_at||"").slice(11,19))}</span></div>`).join("") || `<p class="small">ไม่มีการแจ้งเตือน</p>`);
       staffState.tables = t.tables; renderStaffReservations(r.reservations); renderMoveRequests(m.requests);
       $("staff-orders").innerHTML = o.orders.slice().sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))).map(x => {
         const open = !["closed", "merged"].includes(x.status);
@@ -543,7 +546,7 @@ const App = (() => {
   }
   function showMenuForm(menu={}) {
     $("modal").classList.remove("hidden");
-    $("modal").innerHTML=`<div><h2>${menu.id?"Edit":"Add"} Menu</h2><form onsubmit="App.saveMenu(event,'${menu.id||""}')"><label>ชื่อเมนู<input id="mf-name" value="${escapeAttr(menu.name||"")}" required></label><label>หมวดหมู่<input id="mf-category" value="${escapeAttr(menu.category||"Pasta")}" required></label><label>ราคาเมนูหลัก<input id="mf-price" type="number" min="0" step="0.01" value="${menu.price||""}" required></label><label>รูปเมนู<input id="mf-image-file" type="file" accept="image/png,image/jpeg,image/webp"><input id="mf-image" type="hidden" value="${escapeAttr(menu.image_url||"")}"><span class="small">รองรับ PNG/JPG/WEBP ขนาดไม่เกิน 2 MB</span></label><label><input id="mf-stock" type="checkbox" ${menu.is_out_of_stock?"checked":""}> สินค้าหมด</label><h3>ตัวเลือกพิเศษและราคาเพิ่ม</h3><div id="menu-options">${optionRows(menu.options)}</div><button type="button" class="secondary" onclick="App.addOptionGroup()">+ เพิ่มกลุ่มตัวเลือก</button><div class="actions"><button class="primary">Save</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form></div>`;
+    $("modal").innerHTML=`<div><h2>${menu.id?"Edit":"Add"} Menu</h2><form onsubmit="App.saveMenu(event,'${menu.id||""}')"><label>ชื่อเมนู<input id="mf-name" value="${escapeAttr(menu.name||"")}" required></label><label>หมวดหมู่<select id="mf-category" required><option value="อาหาร" ${menu.category==="อาหาร"||["Pasta","Pizza","Steak","Salad"].includes(menu.category)?"selected":""}>อาหาร</option><option value="ของหวาน" ${menu.category==="ของหวาน"?"selected":""}>ของหวาน</option><option value="เครื่องดื่ม" ${menu.category==="เครื่องดื่ม"?"selected":""}>เครื่องดื่ม</option></select></label><label>ราคาเมนูหลัก<input id="mf-price" type="number" min="0" step="0.01" value="${menu.price||""}" required></label><label>รูปเมนู<input id="mf-image-file" type="file" accept="image/png,image/jpeg,image/webp"><input id="mf-image" type="hidden" value="${escapeAttr(menu.image_url||"")}"><span class="small">รองรับ PNG/JPG/WEBP ขนาดไม่เกิน 2 MB</span></label><label><input id="mf-stock" type="checkbox" ${menu.is_out_of_stock?"checked":""}> สินค้าหมด</label><h3>ตัวเลือกพิเศษและราคาเพิ่ม</h3><div id="menu-options">${optionRows(menu.options)}</div><button type="button" class="secondary" onclick="App.addOptionGroup()">+ เพิ่มกลุ่มตัวเลือก</button><div class="actions"><button class="primary">Save</button><button type="button" class="secondary" onclick="App.closeModal()">Cancel</button></div></form></div>`;
   }
   function addOptionGroup(){const box=$("menu-options");box.insertAdjacentHTML("beforeend",`<div class="option-group"><div class="table-row"><input class="option-group-name" placeholder="ชื่อกลุ่ม เช่น ขนาด"><button type="button" class="secondary" onclick="this.closest('.option-group').remove()">ลบกลุ่ม</button></div><div class="option-values"></div><button type="button" class="secondary" onclick="App.addOptionValue(this)">+ เพิ่มค่าตัวเลือก</button></div>`)}
   function addOptionValue(button){button.previousElementSibling.insertAdjacentHTML("beforeend",`<div class="option-value"><input class="option-value-name" placeholder="ค่าตัวเลือก" required><input class="option-value-price" type="number" min="0" step="0.01" value="0" placeholder="ราคาเพิ่ม"><button type="button" class="secondary" onclick="this.parentElement.remove()">ลบ</button></div>`)}

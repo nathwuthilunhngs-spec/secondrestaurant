@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import re
 try:
     from .config import VAT_RATE, SERVICE_CHARGE_RATE, RESERVATION_SLOT_MINUTES
 except ImportError:
@@ -6,6 +7,14 @@ except ImportError:
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+NAME_RE = re.compile(r"^[A-Za-z\u0E00-\u0E7F]+(?: +[A-Za-z\u0E00-\u0E7F]+)*$")
+MENU_CATEGORIES = {"อาหาร", "ของหวาน", "เครื่องดื่ม"}
+def validate_person_name(value, field="ชื่อ"):
+    text = str(value or "").strip()
+    if not text or not NAME_RE.fullmatch(text):
+        raise ValueError(f"{field} ใช้ได้เฉพาะตัวอักษรไทย/อังกฤษและเว้นวรรค โดยห้ามเป็นเว้นวรรคอย่างเดียว")
+    return text
 
 def clean_text(value, field, max_len=120):
     if not isinstance(value, str):
@@ -134,6 +143,9 @@ def normalize_options(options):
 def validate_menu_payload(data):
     name = clean_text(data.get("name"), "ชื่อเมนู", 100)
     category = clean_text(data.get("category"), "หมวดหมู่", 60)
+    if category not in MENU_CATEGORIES:
+        raise ValueError("หมวดเมนูต้องเป็น อาหาร, ของหวาน หรือ เครื่องดื่ม")
+    name = validate_person_name(name, "ชื่อเมนู")
     price = to_positive_number(data.get("price"), "ราคา")
     options = normalize_options(data.get("options"))
     return {
@@ -162,7 +174,7 @@ def parse_reservation_dt(value):
             continue
     raise ValueError("รูปแบบเวลาไม่ถูกต้อง")
 
-def find_reservation_conflict(reservations, table_number, when, ignore_id=None, slot_minutes=RESERVATION_SLOT_MINUTES):
+def find_reservation_conflict(reservations, table_number, when, ignore_id=None, slot_minutes=90):
     """Return the existing active reservation that overlaps `when` for the same table, or None."""
     window = timedelta(minutes=slot_minutes)
     for res in reservations:

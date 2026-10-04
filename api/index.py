@@ -7,11 +7,14 @@ import base64
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
+import urllib.parse
+import urllib.request
+import urllib.error
 
 try:
     from .config import (
         RESTAURANT_NAME, RESTAURANT_TAGLINE, POLL_INTERVAL_SECONDS,
-        BOOTSTRAP_SECRET, is_configured, is_local_mode
+        BOOTSTRAP_SECRET, FIREBASE_STORAGE_BUCKET, FIREBASE_DB_URL, is_configured, is_local_mode
     )
     from .firebase import get, put, patch, post, delete, FirebaseError
     from .auth import (
@@ -22,13 +25,13 @@ try:
     from .biz_logic import (
         now_iso, clean_text, to_positive_number, to_positive_int, calculate_bill,
         paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload,
-        parse_reservation_dt, find_reservation_conflict
+        parse_reservation_dt, find_reservation_conflict, validate_person_name, MENU_CATEGORIES
     )
 except ImportError:
     # Supports `python api/index.py` from the project root as well as package imports on Vercel.
     from config import (
         RESTAURANT_NAME, RESTAURANT_TAGLINE, POLL_INTERVAL_SECONDS,
-        BOOTSTRAP_SECRET, is_configured, is_local_mode
+        BOOTSTRAP_SECRET, FIREBASE_STORAGE_BUCKET, FIREBASE_DB_URL, is_configured, is_local_mode
     )
     from firebase import get, put, patch, post, delete, FirebaseError
     from auth import (
@@ -39,7 +42,7 @@ except ImportError:
     from biz_logic import (
         now_iso, clean_text, to_positive_number, to_positive_int, calculate_bill,
         paginate, search_filter_sort, ensure_table_can_order, validate_menu_payload,
-        parse_reservation_dt, find_reservation_conflict
+        parse_reservation_dt, find_reservation_conflict, validate_person_name, MENU_CATEGORIES
     )
 
 PUBLIC_GETS = {"/api/health", "/api/config"}
@@ -67,7 +70,7 @@ def json_body(handler):
         raise ValueError("ข้อมูลต้องเป็น JSON object")
     return data
 
-def save_uploaded_image(data):
+def save_uploaded_image(data, auth_token=""):
     raw = data.get("image_data")
     filename = clean_text(str(data.get("filename", "image")), "ชื่อไฟล์", 120)
     if not isinstance(raw, str) or not raw.startswith("data:image/"):
@@ -83,12 +86,32 @@ def save_uploaded_image(data):
     if len(content) > 2_000_000:
         raise ValueError("ไฟล์รูปต้องมีขนาดไม่เกิน 2 MB")
     safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "-", os.path.splitext(filename)[0]).strip("-") or "menu"
-    upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "public", "uploads"))
-    os.makedirs(upload_dir, exist_ok=True)
     output_name = f"{safe_stem}_{uuid.uuid4().hex[:10]}.{ext}"
-    with open(os.path.join(upload_dir, output_name), "wb") as handle:
-        handle.write(content)
-    return f"/uploads/{output_name}"
+    if is_local_mode():
+        upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "public", "uploads"))
+        os.makedirs(upload_dir, exist_ok=True)
+        with open(os.path.join(upload_dir, output_name), "wb") as handle:
+            handle.write(content)
+        return f"/uploads/{output_name}"
+    if not FIREBASE_STORAGE_BUCKET:
+        raise FirebaseError("ยังไม่ได้ตั้งค่า FIREBASE_STORAGE_BUCKET สำหรับ Firebase Storage")
+    storage_name = urllib.parse.quote(f"menu-images/{output_name}", safe="")
+    url = f"https://firebasestorage.googleapis.com/v0/b/{FIREBASE_STORAGE_BUCKET}/o?uploadType=media&name={storage_name}"
+    headers = {"Content-Type": f"image/{'jpeg' if ext == 'jpg' else ext}"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    req = urllib.request.Request(url, data=content, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            uploaded = json.loads(res.read().decode("utf-8"))
+    except Exception as exc:
+        raise FirebaseError(f"อัปโหลดรูปไป Firebase Storage ไม่สำเร็จ: {exc}")
+    encoded_name = urllib.parse.quote(uploaded.get("name", f"menu-images/{output_name}"), safe="")
+    token = (uploaded.get("downloadTokens") or "").split(",")[0]
+    download = f"https://firebasestorage.googleapis.com/v0/b/{FIREBASE_STORAGE_BUCKET}/o/{encoded_name}?alt=media"
+    if token:
+        download += f"&token={urllib.parse.quote(token)}"
+    return download
 
 def response(handler, status, payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -103,6 +126,13 @@ def response(handler, status, payload):
 
 def error_response(handler, status, message):
     response(handler, status, {"ok": False, "message": str(message)})
+
+def notify_staff(kind, title, detail, target_id=""):
+    try:
+        nid = new_id("notice")
+        put(f"notifications/{nid}", {"id": nid, "kind": kind, "title": title, "detail": detail, "target_id": target_id, "read": False, "created_at": now_iso()})
+    except Exception:
+        pass
 
 def audit(profile, action, target_type, target_id, detail=""):
     try:
@@ -155,8 +185,25 @@ def normalize_available_table(table):
     if order and order.get("status") not in ("closed", "merged"):
         patch(f"tables/{table['id']}", {"status": "occupied"})
         return {**table, "status": "occupied"}
-    patch(f"tables/{table['id']}", {"claimed_by": None, "current_order_id": None})
-    return {**table, "claimed_by": None, "current_order_id": None}
+    patch(f"tables/{table['id']}", {"claimed_by": None, "current_order_id": None, "current_round_id": None, "occupant_ids": [], "party_size": None})
+    return {**table, "claimed_by": None, "current_order_id": None, "current_round_id": None, "occupant_ids": [], "party_size": None}
+
+def repair_stale_tables():
+    tables = get("tables") or {}
+    if not isinstance(tables, dict):
+        return
+    orders = get("orders") or {}
+    for table in tables.values():
+        if not isinstance(table, dict) or table.get("status") not in {"occupied", "waiting_bill"}:
+            continue
+        members = table_members(table)
+        active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table.get("id") and o.get("status") not in {"closed", "merged", "cancelled"}]
+        if members:
+            continue
+        for order in active:
+            patch(f"orders/{order.get('id')}", {"status": "cancelled", "cancelled_at": now_iso(), "cancelled_reason": "ไม่พบลูกค้าในโต๊ะ"})
+        patch(f"tables/{table.get('id')}", {"status": "available", "current_order_id": None, "current_round_id": None, "claimed_by": None, "occupant_ids": [], "party_size": None, "split_requested": False})
+        post("audit_logs", {"id": new_id("log"), "action": "AUTO_CANCEL_EMPTY_TABLE", "target_type": "table", "target_id": table.get("id"), "detail": "ยกเลิกบิลเปิดเพราะไม่มี Customer", "timestamp": now_iso()})
 
 def require_staff(profile):
     require_role(profile, "admin", "staff")
@@ -223,7 +270,16 @@ def build_order_items(raw_items):
 
 def public_menu_list():
     data = get("menus") or {}
-    return [v for v in data.values() if isinstance(v, dict)] if isinstance(data, dict) else []
+    legacy_food = {"Pasta", "Pizza", "Steak", "Salad", "อาหาร"}
+    result = []
+    for value in data.values() if isinstance(data, dict) else []:
+        if not isinstance(value, dict):
+            continue
+        item = dict(value)
+        if item.get("category") in legacy_food:
+            item["category"] = "อาหาร"
+        result.append(item)
+    return result
 
 class handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -303,6 +359,7 @@ class handler(BaseHTTPRequestHandler):
             if path == "/api/customer/tables":
                 require_role(profile, "customer")
                 expire_overdue_reservations()
+                repair_stale_tables()
                 tables = get("tables") or {}
                 values = []
                 for raw in (list(tables.values()) if isinstance(tables, dict) else []):
@@ -314,6 +371,7 @@ class handler(BaseHTTPRequestHandler):
             if path == "/api/tables":
                 require_staff(profile)
                 expire_overdue_reservations()
+                repair_stale_tables()
                 tables = get("tables") or {}
                 values = list(tables.values()) if isinstance(tables, dict) else []
                 return response(self, 200, {"ok": True, "tables": values})
@@ -358,6 +416,12 @@ class handler(BaseHTTPRequestHandler):
                 values = [r for r in (requests.values() if isinstance(requests, dict) else []) if r.get("customer_id") == profile.get("id")]
                 values.sort(key=lambda x: x.get("created_at", ""), reverse=True)
                 return response(self, 200, {"ok": True, "requests": values})
+            if path == "/api/notifications":
+                require_staff(profile)
+                notices = get("notifications") or {}
+                values = list(notices.values()) if isinstance(notices, dict) else []
+                values.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+                return response(self, 200, {"ok": True, "notifications": values[:50]})
             if path == "/api/table-move-requests":
                 require_staff(profile)
                 requests = get("table_move_requests") or {}
@@ -489,8 +553,8 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError("อีเมลไม่ถูกต้อง")
                 if not validate_password(password):
                     raise ValueError("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
-                if not name:
-                    raise ValueError("กรุณากรอกชื่อ")
+                validate_person_name(name)
+
                 auth = firebase_signup(email, password)
                 profile = create_profile(auth["localId"], email, name, "customer", password=password)
                 return response(self, 201, {"ok": True, "message": "สมัครสมาชิกสำเร็จ", "token": auth["idToken"], "user": profile})
@@ -516,11 +580,11 @@ class handler(BaseHTTPRequestHandler):
                 profile = create_profile(auth["localId"], email, name, "admin", password=password)
                 return response(self, 201, {"ok": True, "message": "สร้าง Admin สำเร็จ", "user": profile})
 
-            profile, _ = require_user(self.headers)
+            profile, auth_token = require_user(self.headers)
 
             if path == "/api/uploads/menu-image":
                 require_role(profile, "admin")
-                image_url = save_uploaded_image(data)
+                image_url = save_uploaded_image(data, auth_token)
                 return response(self, 201, {"ok": True, "image_url": image_url})
             if path == "/api/menus":
                 require_role(profile, "admin")
@@ -536,8 +600,9 @@ class handler(BaseHTTPRequestHandler):
                 email = str(data.get("email", "")).strip().lower()
                 password = data.get("password")
                 name = str(data.get("name", "")).strip()
-                if not safe_email(email) or not validate_password(password) or not name:
+                if not safe_email(email) or not validate_password(password):
                     raise ValueError("ข้อมูล Staff ไม่ถูกต้อง")
+                validate_person_name(name, "ชื่อ Staff")
                 auth = firebase_signup(email, password)
                 staff = create_profile(auth["localId"], email, name, "staff", password=password)
                 audit(profile, "CREATE_STAFF", "user", staff["id"], email)
@@ -579,6 +644,7 @@ class handler(BaseHTTPRequestHandler):
                         "status": "pending", "timestamp": now_iso()
                     })
                 audit(profile, "CREATE_ORDER", "order", order_id, f"table={table_id}")
+                notify_staff("new_order", "มีออเดอร์ใหม่", f"โต๊ะ {table.get('table_number')}", order_id)
                 return response(self, 201, {"ok": True, "order": order})
 
             if path == "/api/orders/split-by-customer":
@@ -706,6 +772,7 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError("โต๊ะปลายทางต้องต่างจากโต๊ะปัจจุบัน")
                 request = {"id": new_id("move"), "customer_id": profile.get("id"), "customer_name": profile.get("name"), "table_id": order.get("table_id"), "table_number": order.get("table_number"), "new_table_id": target_id, "new_table_number": target.get("table_number"), "status": "pending", "created_at": now_iso()}
                 put(f"table_move_requests/{request['id']}", request)
+                notify_staff("move_request", "มีคำขอย้ายโต๊ะ", f"โต๊ะ {request.get('table_number')} ไป {request.get('new_table_number')}", request["id"])
                 return response(self, 201, {"ok": True, "request": request})
             if path == "/api/customer/split-bill-requests":
                 require_role(profile, "customer")
@@ -720,6 +787,7 @@ class handler(BaseHTTPRequestHandler):
                 if table.get("split_requested"):
                     return response(self, 200, {"ok": True, "message": "โต๊ะนี้ขอแยกบิลไว้แล้ว"})
                 patch(f"tables/{table_id}", {"split_requested": True, "split_requested_by": profile.get("id"), "split_requested_at": now_iso()})
+                notify_staff("split_request", "มีคำขอแยกบิล", f"โต๊ะ {table.get('table_number')}", table_id)
                 return response(self, 201, {"ok": True, "message": "ส่งคำขอแยกบิลให้ Staff แล้ว"})
             if path == "/api/customer/orders":
                 require_role(profile, "customer")
@@ -762,6 +830,7 @@ class handler(BaseHTTPRequestHandler):
                     put(f"kitchen/{kid}", {"id": kid, "order_id": order_id, "order_item_id": f"{order_id}_{item['menu_id']}",
                          "menu_name": item["name"], "options": item["options"], "table_number": table.get("table_number"),
                          "quantity": item["quantity"], "status": "pending", "timestamp": now_iso()})
+                notify_staff("new_order", "มีออเดอร์ใหม่", f"โต๊ะ {table.get('table_number')}", order_id)
                 return response(self, 201, {"ok": True, "order": order})
             if path == "/api/tables/move":
                 require_staff(profile)
@@ -805,7 +874,7 @@ class handler(BaseHTTPRequestHandler):
 
             if path == "/api/reservations":
                 expire_overdue_reservations()
-                name = clean_text(data.get("customer_name"), "ชื่อ", 100)
+                name = validate_person_name(data.get("customer_name"), "ชื่อผู้จอง")
                 phone = clean_text(data.get("phone"), "เบอร์โทร", 30)
                 if not phone.isdigit() or len(phone) != 10:
                     raise ValueError("เบอร์โทรต้องเป็นตัวเลข 10 หลักเท่านั้น")
@@ -817,6 +886,8 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError("กรุณาระบุเวลาในรูปแบบ HH:MM")
                 if when.date() != datetime.now().date():
                     raise ValueError("ระบบรับจองเฉพาะวันนี้เท่านั้น")
+                if when.hour < 9:
+                    raise ValueError("ระบบเปิดให้จองตั้งแต่ 09:00 เป็นต้นไป")
                 minimum_time = datetime.now() + timedelta(minutes=30)
                 if when < minimum_time:
                     raise ValueError("กรุณาจองล่วงหน้าอย่างน้อย 30 นาที")
@@ -897,6 +968,15 @@ class handler(BaseHTTPRequestHandler):
                     allowed = {"available", "occupied", "waiting_bill", "reserved"}
                     if data.get("status") not in allowed:
                         raise ValueError("สถานะโต๊ะไม่ถูกต้อง")
+                    if data.get("status") == "available":
+                        table = find_by_id("tables", table_id)
+                        orders = get("orders") or {}
+                        active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table_id and o.get("status") not in {"closed", "merged", "cancelled"}]
+                        if table_members(table):
+                            raise ValueError("ยังมี Customer อยู่ในโต๊ะ จึงเปลี่ยนเป็นว่างไม่ได้")
+                        for order in active:
+                            patch(f"orders/{order.get('id')}", {"status": "cancelled", "cancelled_at": now_iso(), "cancelled_reason": "Staff เปลี่ยนโต๊ะเป็นว่าง"})
+                        updates.update({"current_order_id": None, "current_round_id": None, "claimed_by": None, "occupant_ids": [], "party_size": None, "split_requested": False})
                     updates["status"] = data.get("status")
                 if not updates:
                     raise ValueError("ไม่มีข้อมูลที่ต้องการอัปเดต")
@@ -965,6 +1045,8 @@ class handler(BaseHTTPRequestHandler):
                     return error_response(self, 404, "ไม่พบบิลของคุณ")
                 if order.get("status") in ("closed", "merged"):
                     raise ValueError("บิลนี้ปิดแล้ว ไม่สามารถเช็คบิลซ้ำได้")
+                if order.get("status") == "waiting_bill":
+                    return response(self, 200, {"ok": True, "already_requested": True, "message": "เรียกเช็คบิลแล้ว กำลังรอพนักงาน"})
                 requested_points = int(data.get("points_to_use", 0) or 0)
                 if requested_points < 0 or requested_points % 100 != 0:
                     raise ValueError("การใช้แต้มต้องใช้ครั้งละ 100 แต้ม")
@@ -977,6 +1059,7 @@ class handler(BaseHTTPRequestHandler):
                 table_id = order.get("table_id")
                 if table_id:
                     patch(f"tables/{table_id}", {"status": "waiting_bill"})
+                notify_staff("checkout_request", "ลูกค้าเรียกเช็คบิล", f"โต๊ะ {bill_table.get('table_number') if bill_table else '-'}", order_id)
                 return response(self, 200, {"ok": True, "message": "เรียกพนักงานเช็คบิลแล้ว"})
             if path.startswith("/api/orders/") and path.endswith("/checkout"):
                 require_staff(profile)
@@ -986,6 +1069,10 @@ class handler(BaseHTTPRequestHandler):
                     return error_response(self, 404, "ไม่พบออเดอร์")
                 if order.get("status") in ("closed", "merged"):
                     return error_response(self, 400, "ไม่สามารถเช็คบิลซ้ำได้")
+                if order.get("checkout_lock"):
+                    return error_response(self, 409, "บิลนี้กำลังถูกเช็คบิลโดยพนักงานคนอื่น")
+                patch(f"orders/{order_id}", {"checkout_lock": {"staff_id": profile.get("id"), "at": now_iso()}})
+                order["checkout_lock"] = True
                 discount = to_positive_number(data.get("discount", 0), "ส่วนลด", allow_zero=True)
                 requested_points, points_reduction, subtotal = points_discount(order.get("items", []), order.get("points_to_use", 0))
                 if discount + points_reduction > subtotal:
@@ -1002,7 +1089,7 @@ class handler(BaseHTTPRequestHandler):
                     current_points = int(user.get("member_points", 0) or 0)
                     if requested_points > current_points:
                         raise ValueError("แต้มของลูกค้าไม่เพียงพอ")
-                closed = {**bill, "earned_points": earned_points, "status": "closed", "closed_at": now_iso(), "closed_by": profile["id"]}
+                closed = {**bill, "earned_points": earned_points, "status": "closed", "checkout_lock": None, "closed_at": now_iso(), "closed_by": profile["id"]}
                 patch(f"orders/{order_id}", closed)
                 table_id = order.get("table_id")
                 if table_id:
@@ -1017,6 +1104,7 @@ class handler(BaseHTTPRequestHandler):
                     patch(f"users/{customer_id}", {"member_points": new_points})
                     closed["member_points_after"] = new_points
                 audit(profile, "CHECKOUT_ORDER", "order", order_id, str(bill["total"]))
+                notify_staff("checkout_done", "ปิดบิลสำเร็จ", f"โต๊ะ {order.get('table_number', '-')}", order_id)
                 return response(self, 200, {"ok": True, "order": {**order, **closed}})
 
             return error_response(self, 404, "ไม่พบ API ที่ร้องขอ")
