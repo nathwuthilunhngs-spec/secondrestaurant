@@ -17,15 +17,6 @@
       "member_points": 0,
       "active": true,
       "password_hash": "pbkdf2_sha256$120000$92f72e3560b5458be82215aa8d5d9b57$c845259beefbc1108f06b1aa5f25e6cf6021a21f70db2ffa1042b44e315e220b"
-    },
-    "local_8fa52f9271074be3": {
-      "id": "local_8fa52f9271074be3",
-      "email": "test@gmail.com",
-      "name": "test",
-      "role": "customer",
-      "member_points": 0,
-      "active": true,
-      "password_hash": "pbkdf2_sha256$120000$5b92968e47742de56a2945895e6006e1$50572f80e439bb58984bd54fb5c0e37f9de94ec1a44d84c11b6c79b2eb519d5c"
     }
   },
   "menus": {
@@ -139,14 +130,7 @@
       "table_number": "02",
       "status": "available",
       "current_order_id": null,
-      "capacity": 4,
-      "claimed_by": null,
-      "occupant_ids": [],
-      "party_size": null,
-      "current_round_id": null,
-      "split_requested": false,
-      "split_requested_by": "local_8fa52f9271074be3",
-      "split_requested_at": "2026-10-04T16:19:29.189155+00:00"
+      "capacity": 4
     },
     "table_03": {
       "id": "table_03",
@@ -206,38 +190,6 @@
       "created_at": "2026-10-04T13:46:07.771164+00:00",
       "source": "qr",
       "round_id": "order_2d05ed04c25d"
-    },
-    "order_e7b68c402a87": {
-      "id": "order_e7b68c402a87",
-      "table_id": "table_02",
-      "table_number": "02",
-      "customer_id": "local_8fa52f9271074be3",
-      "party_size": 1,
-      "items": [
-        {
-          "menu_id": "menu_007",
-          "name": "Caesar Salad",
-          "unit_price": 149.0,
-          "base_price": 149.0,
-          "quantity": 1,
-          "options": {},
-          "customer_id": "local_8fa52f9271074be3"
-        }
-      ],
-      "subtotal": 149.0,
-      "discount": 0.0,
-      "service_charge": 14.9,
-      "tax": 11.47,
-      "total": 175.37,
-      "status": "cancelled",
-      "created_by": "local_8fa52f9271074be3",
-      "created_at": "2026-10-04T16:19:23.019046+00:00",
-      "source": "qr",
-      "round_id": "order_e7b68c402a87",
-      "checkout_requested_at": "2026-10-04T16:19:32.241178+00:00",
-      "points_to_use": 0,
-      "cancelled_at": "2026-10-04T16:20:03.359808+00:00",
-      "cancelled_reason": "Customer ออกจากระบบ"
     }
   },
   "kitchen": {
@@ -251,17 +203,6 @@
       "quantity": 1,
       "status": "pending",
       "timestamp": "2026-10-04T13:46:07.777402+00:00"
-    },
-    "kit_e6d579cbd9c8": {
-      "id": "kit_e6d579cbd9c8",
-      "order_id": "order_e7b68c402a87",
-      "order_item_id": "order_e7b68c402a87_menu_007",
-      "menu_name": "Caesar Salad",
-      "options": {},
-      "table_number": "02",
-      "quantity": 1,
-      "status": "pending",
-      "timestamp": "2026-10-04T16:19:23.025407+00:00"
     }
   },
   "audit_logs": {
@@ -275,84 +216,6 @@
       "target_id": "table_01",
       "detail": "",
       "timestamp": "2026-10-04T13:45:59.367223+00:00"
-    },
-    "3f68264d315d496e9c14": {
-      "id": "log_53ce556cc98c",
-      "user_id": "local_8fa52f9271074be3",
-      "user_name": "test",
-      "role": "customer",
-      "action": "CLAIM_TABLE",
-      "target_type": "table",
-      "target_id": "table_02",
-      "detail": "",
-      "timestamp": "2026-10-04T16:19:12.408227+00:00"
-    },
-    "ca96a3b5dac74fa39990": {
-      "id": "log_14a97ffe879a",
-      "user_id": "local_8fa52f9271074be3",
-      "action": "CANCEL_BILL_ON_LOGOUT",
-      "target_type": "order",
-      "target_id": "order_e7b68c402a87",
-      "detail": "ยกเลิกบิลของ Customer ที่ Logout",
-      "timestamp": "2026-10-04T16:20:03.363180+00:00"
-    },
-    "b74e5a9159524560964d": {
-      "id": "log_f81901201e23",
-      "user_id": "local_8fa52f9271074be3",
-      "action": "CANCEL_EMPTY_TABLE_BILLS",
-      "target_type": "table",
-      "target_id": "table_02",
-      "detail": "ยกเลิกบิลทั้งหมดเพราะไม่มี Customer เหลือ",
-      "timestamp": "2026-10-04T16:20:03.369279+00:00"
-    },
-    "d3fc2b214cae44acbc52": {
-      "id": "log_bf486b3fbb68",
-      "user_id": "local_8fa52f9271074be3",
-      "user_name": "test",
-      "role": "customer",
-      "action": "LEAVE_TABLE",
-      "target_type": "table",
-      "target_id": "table_02",
-      "detail": "logout/session expired",
-      "timestamp": "2026-10-04T16:20:03.371467+00:00"
-    }
-  },
-  "notifications": {
-    "notice_63b08cd79e34": {
-      "id": "notice_63b08cd79e34",
-      "kind": "new_order",
-      "title": "มีออเดอร์ใหม่",
-      "detail": "โต๊ะ 02",
-      "target_id": "order_e7b68c402a87",
-      "read": false,
-      "created_at": "2026-10-04T16:19:23.028421+00:00"
-    },
-    "notice_c9c255ba4288": {
-      "id": "notice_c9c255ba4288",
-      "kind": "split_request",
-      "title": "มีคำขอแยกบิล",
-      "detail": "โต๊ะ 02",
-      "target_id": "table_02",
-      "read": false,
-      "created_at": "2026-10-04T16:19:25.860260+00:00"
-    },
-    "notice_92d18f728d56": {
-      "id": "notice_92d18f728d56",
-      "kind": "split_request",
-      "title": "มีคำขอแยกบิล",
-      "detail": "โต๊ะ 02",
-      "target_id": "table_02",
-      "read": false,
-      "created_at": "2026-10-04T16:19:29.192294+00:00"
-    },
-    "notice_f8594457e4a1": {
-      "id": "notice_f8594457e4a1",
-      "kind": "checkout_request",
-      "title": "ลูกค้าเรียกเช็คบิล",
-      "detail": "โต๊ะ 02",
-      "target_id": "order_e7b68c402a87",
-      "read": false,
-      "created_at": "2026-10-04T16:19:32.248194+00:00"
     }
   }
 }

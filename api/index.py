@@ -188,46 +188,6 @@ def normalize_available_table(table):
     patch(f"tables/{table['id']}", {"claimed_by": None, "current_order_id": None, "current_round_id": None, "occupant_ids": [], "party_size": None})
     return {**table, "claimed_by": None, "current_order_id": None, "current_round_id": None, "occupant_ids": [], "party_size": None}
 
-def leave_customer_tables(uid):
-    """Cancel only the leaving customer's bill/items; cancel all remaining bills when table is empty."""
-    uid = str(uid)
-    tables = get("tables") or {}
-    orders = get("orders") or {}
-    changed = []
-    for table in tables.values() if isinstance(tables, dict) else []:
-        if not isinstance(table, dict):
-            continue
-        members = table_members(table)
-        if uid not in members:
-            continue
-        remaining = [member for member in members if member != uid]
-        table_id = table.get("id")
-        active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table_id and o.get("status") not in {"closed", "merged", "cancelled"}]
-        for order in active:
-            items = list(order.get("items") or [])
-            kept = [item for item in items if str(item.get("customer_id")) != uid]
-            removed = len(kept) != len(items) or str(order.get("customer_id")) == uid
-            if not removed:
-                continue
-            if kept:
-                next_owner = str(kept[0].get("customer_id") or (remaining[0] if remaining else "")) or None
-                patch(f"orders/{order.get('id')}", {"items": kept, "customer_id": next_owner, **calculate_bill(kept, order.get("discount", 0))})
-            else:
-                patch(f"orders/{order.get('id')}", {"status": "cancelled", "cancelled_at": now_iso(), "cancelled_reason": "Customer ออกจากระบบ"})
-                post("audit_logs", {"id": new_id("log"), "user_id": uid, "action": "CANCEL_BILL_ON_LOGOUT", "target_type": "order", "target_id": order.get("id"), "detail": "ยกเลิกบิลของ Customer ที่ Logout", "timestamp": now_iso()})
-        if remaining:
-            new_owner = remaining[0] if str(table.get("claimed_by")) == uid else table.get("claimed_by")
-            patch(f"tables/{table_id}", {"occupant_ids": remaining, "claimed_by": new_owner})
-            changed.append({"table_id": table_id, "new_owner": new_owner, "remaining": remaining})
-        else:
-            for order in active:
-                fresh = find_by_id("orders", order.get("id")) or order
-                if fresh.get("status") not in {"closed", "merged", "cancelled"}:
-                    patch(f"orders/{order.get('id')}", {"status": "cancelled", "cancelled_at": now_iso(), "cancelled_reason": "ไม่มี Customer เหลือในโต๊ะ"})
-            patch(f"tables/{table_id}", {"status": "available", "current_order_id": None, "current_round_id": None, "claimed_by": None, "occupant_ids": [], "party_size": None, "split_requested": False})
-            post("audit_logs", {"id": new_id("log"), "user_id": uid, "action": "CANCEL_EMPTY_TABLE_BILLS", "target_type": "table", "target_id": table_id, "detail": "ยกเลิกบิลทั้งหมดเพราะไม่มี Customer เหลือ", "timestamp": now_iso()})
-            changed.append({"table_id": table_id, "new_owner": None, "remaining": []})
-    return changed
 def repair_stale_tables():
     tables = get("tables") or {}
     if not isinstance(tables, dict):
@@ -428,7 +388,7 @@ class handler(BaseHTTPRequestHandler):
                 order_for_bill = find_by_id("orders", path.split("/")[-2])
                 if profile.get("role") == "customer":
                     bill_table = find_by_id("tables", order_for_bill.get("table_id")) if order_for_bill else None
-                    allowed_customer = order_for_bill and (order_for_bill.get("customer_id") == profile.get("id") or (bill_table and table_has_member(bill_table, profile.get("id"))))
+                    allowed_customer = order_for_bill and (order_for_bill.get("customer_id") == profile.get("id") or (bill_table and bill_table.get("claimed_by") == profile.get("id")))
                     if not allowed_customer:
                         return error_response(self, 404, "ไม่พบบิลของคุณ")
                 else:
@@ -691,7 +651,7 @@ class handler(BaseHTTPRequestHandler):
                 require_staff(profile)
                 order_id = clean_text(data.get("order_id"), "Order ID", 80)
                 order = find_by_id("orders", order_id)
-                if not order or order.get("status") in ("closed", "merged", "cancelled"):
+                if not order or order.get("status") in ("closed", "merged"):
                     raise ValueError("ไม่พบออเดอร์หรือบิลถูกปิดแล้ว")
                 table = find_by_id("tables", order.get("table_id"))
                 if not table or not table.get("split_requested"):
@@ -704,20 +664,16 @@ class handler(BaseHTTPRequestHandler):
                     (groups.setdefault(cid, []) if cid else central).append(item)
                 created = []
                 for cid, group in groups.items():
-                    if not cid or not group:
-                        continue
+                    if not group: continue
                     nid = new_id("order")
                     bill = calculate_bill(group, 0)
-                    child = {**bill, "id": nid, "table_id": order["table_id"], "table_number": order.get("table_number"), "customer_id": cid, "items": group, "status": "open", "created_by": profile["id"], "created_at": now_iso(), "split_from": order_id, "round_id": order.get("round_id") or order_id, "bill_group": "split"}
-                    put(f"orders/{nid}", child)
-                    created.append(child)
+                    child = {**bill, "id": nid, "table_id": order["table_id"], "table_number": order.get("table_number"), "customer_id": cid, "items": group, "status": "open", "created_by": profile["id"], "created_at": now_iso(), "split_from": order_id, "round_id": order.get("round_id") or order_id}
+                    put(f"orders/{nid}", child); created.append(child)
                 if central:
-                    patch(f"orders/{order_id}", {"items": central, **calculate_bill(central, 0), "split_role": "central", "bill_group": "central"})
-                    current_order_id = order_id
+                    patch(f"orders/{order_id}", {"items": central, **calculate_bill(central, 0), "split_role": "central"})
                 else:
                     patch(f"orders/{order_id}", {"status": "merged", "split_role": "split_parent"})
-                    current_order_id = created[0]["id"] if created else None
-                patch(f"tables/{order['table_id']}", {"split_requested": False, "split_requested_by": None, "current_order_id": current_order_id, "current_round_id": order.get("round_id") or order_id})
+                patch(f"tables/{order['table_id']}", {"split_requested": False, "split_requested_by": None})
                 return response(self, 200, {"ok": True, "orders": created, "central": central})
             if path == "/api/orders/split":
                 require_staff(profile)
@@ -786,11 +742,6 @@ class handler(BaseHTTPRequestHandler):
                     raise ValueError(f"โต๊ะนี้รองรับได้สูงสุด {capacity} คน")
                 patch(f"tables/{table_id}", {"party_size": party_size, "occupant_ids": table_members(table)})
                 return response(self, 200, {"ok": True, "table": {**table, "party_size": party_size, "capacity": capacity}})
-            if path == "/api/customer/leave":
-                require_role(profile, "customer")
-                changes = leave_customer_tables(profile.get("id"))
-                audit(profile, "LEAVE_TABLE", "table", changes[0]["table_id"] if changes else "", "logout/session expired")
-                return response(self, 200, {"ok": True, "changes": changes})
             if path == "/api/customer/tables/release":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
@@ -827,43 +778,17 @@ class handler(BaseHTTPRequestHandler):
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
                 table = find_by_id("tables", table_id)
-                if not table or not table_has_member(table, profile.get("id")):
-                    raise ValueError("คุณไม่ได้เป็นสมาชิกของโต๊ะนี้")
+                if not table or table.get("claimed_by") != profile.get("id"):
+                    raise ValueError("คุณไม่มีสิทธิ์ขอแยกบิลโต๊ะนี้")
                 orders = get("orders") or {}
-                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table_id and o.get("status") not in ("closed", "merged", "cancelled")]
+                active = [o for o in (orders.values() if isinstance(orders, dict) else []) if o.get("table_id") == table_id and o.get("status") not in ("closed", "merged")]
                 if not active:
                     raise ValueError("ยังไม่มีบิลที่เปิดอยู่")
-                # The table's first customer owns unassigned items by default.
-                default_owner = str(table.get("claimed_by") or (table_members(table) or [profile.get("id")])[0])
-                members = table_members(table)
-                assignments = data.get("assignments") or []
-                allowed = {str(x) for x in members}
-                already_split = any(o.get("bill_group") == "split" for o in active)
-                initial_split = not table.get("split_requested") and not already_split
-                for order in active:
-                    items = list(order.get("items") or [])
-                    changed = False
-                    for item in items:
-                        if initial_split or not item.get("customer_id"):
-                            item["customer_id"] = default_owner
-                            changed = True
-                    for assignment in assignments:
-                        try:
-                            idx, owner = int(assignment.get("item_index")), str(assignment.get("customer_id"))
-                            assignment_order = str(assignment.get("order_id") or order.get("id"))
-                        except Exception:
-                            continue
-                        if assignment_order == str(order.get("id")) and 0 <= idx < len(items) and owner in allowed:
-                            items[idx]["customer_id"] = owner
-                            changed = True
-                    if changed:
-                        patch(f"orders/{order['id']}", {"items": items, **calculate_bill(items, order.get("discount", 0))})
-                        order["items"] = items
-                if not already_split:
-                    patch(f"tables/{table_id}", {"split_requested": True, "split_requested_by": profile.get("id"), "split_requested_at": now_iso()})
-                    notify_staff("split_request", "มีคำขอแยกบิล", f"โต๊ะ {table.get('table_number')}", table_id)
-                message = "อัปเดตเจ้าของรายการแล้ว" if already_split else "ส่งคำขอแยกบิลให้ Staff แล้ว"
-                return response(self, 201, {"ok": True, "message": message, "members": members, "orders": active, "default_owner": default_owner})
+                if table.get("split_requested"):
+                    return response(self, 200, {"ok": True, "message": "โต๊ะนี้ขอแยกบิลไว้แล้ว"})
+                patch(f"tables/{table_id}", {"split_requested": True, "split_requested_by": profile.get("id"), "split_requested_at": now_iso()})
+                notify_staff("split_request", "มีคำขอแยกบิล", f"โต๊ะ {table.get('table_number')}", table_id)
+                return response(self, 201, {"ok": True, "message": "ส่งคำขอแยกบิลให้ Staff แล้ว"})
             if path == "/api/customer/orders":
                 require_role(profile, "customer")
                 table_id = clean_text(data.get("table_id"), "โต๊ะ", 50)
@@ -1116,9 +1041,7 @@ class handler(BaseHTTPRequestHandler):
                 order_id = path.split("/")[-2]
                 order = find_by_id("orders", order_id)
                 bill_table = find_by_id("tables", order.get("table_id")) if order else None
-                # The current bill is shared by the table. Any active table member may request it,
-                # even when the central bill has no customer_id or belongs to the first member.
-                if not order or not (order.get("customer_id") == profile.get("id") or (bill_table and table_has_member(bill_table, profile.get("id")))):
+                if not order or not (order.get("customer_id") == profile.get("id") or (bill_table and bill_table.get("claimed_by") == profile.get("id"))):
                     return error_response(self, 404, "ไม่พบบิลของคุณ")
                 if order.get("status") in ("closed", "merged"):
                     raise ValueError("บิลนี้ปิดแล้ว ไม่สามารถเช็คบิลซ้ำได้")
