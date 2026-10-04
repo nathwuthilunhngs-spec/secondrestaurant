@@ -1,5 +1,5 @@
 const App = (() => {
-  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, sessionTimer: null, selectedTable: null, pendingTable: null, cart: {}, menus: [], hasActiveOrder: false, hadActiveOrder: false };
+  const state = { user: null, token: localStorage.getItem("itailaew_token"), authMode: "login", menuPage: 1, polling: null, selectedTable: null, pendingTable: null, cart: {}, menus: [], hasActiveOrder: false, hadActiveOrder: false };
   const $ = id => document.getElementById(id);
 
   async function api(path, options = {}) {
@@ -39,6 +39,7 @@ const App = (() => {
     if (state.polling) { clearInterval(state.polling); state.polling = null; }
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     $(id)?.classList.add("active");
+    if (id !== "login") localStorage.setItem("itailaew_current_page", id);
     if (id === "home") loadRecommendedMenus();
     if (id === "table-select") { loadCustomerTables(); const back=$("table-back"); if(back) back.classList.toggle("hidden", !!selectedTable()); }
     if (id === "menu") loadMenus();
@@ -105,8 +106,7 @@ const App = (() => {
       try { await api("/api/customer/leave", {method:"POST", body:JSON.stringify({reason:"logout"})}); } catch (_) { }
     }
     if (state.polling) { clearInterval(state.polling); state.polling = null; }
-    if (state.sessionTimer) { clearTimeout(state.sessionTimer); state.sessionTimer = null; }
-    state.user = null; state.token = null; state.hadActiveOrder=false; state.hasActiveOrder=false; localStorage.removeItem("itailaew_token"); state.selectedTable=null; state.cart={};
+    state.user = null; state.token = null; state.hadActiveOrder=false; state.hasActiveOrder=false; localStorage.removeItem("itailaew_token"); localStorage.removeItem("itailaew_current_page"); state.selectedTable=null; state.cart={};
     refreshNav();
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     $("login")?.classList.add("active");
@@ -130,7 +130,6 @@ const App = (() => {
       const data = await api("/api/me");
       state.user = data.user;
       loadUserStorage();
-      scheduleSessionCleanup();
       validateSelectedTableForUser();
       if (state.user.role === "customer" && state.selectedTable) {
         try {
@@ -145,12 +144,38 @@ const App = (() => {
           if (!live || live.status === "available" || !tableHasCurrentUser(live)) clearCustomerSessionData();
         } catch (_) { }
       }
+      // A refresh must recover the table from Firebase, not only from a stale
+      // localStorage snapshot. This also lets a full table recognize its
+      // existing member instead of showing it as a new join attempt.
+      if (state.user.role === "customer" && !state.selectedTable) {
+        try {
+          const tables = await api("/api/customer/tables");
+          const mine = tables.tables.find(t => tableHasCurrentUser(t));
+          if (mine) {
+            state.selectedTable = mine;
+            localStorage.setItem(tableKey(), JSON.stringify(mine));
+          }
+        } catch (_) { }
+      }
       refreshNav();
-      const target = state.user.role === "admin" ? "admin" : state.user.role === "staff" ? "staff" : "home";
+      const savedPage = localStorage.getItem("itailaew_current_page");
+      const allowed = ["home","menu","reservation","customer","table-select","cart","admin","staff","tables","pos"];
+      let target = allowed.includes(savedPage) ? savedPage : (state.user.role === "admin" ? "admin" : state.user.role === "staff" ? "staff" : "home");
+      if (state.user.role === "customer" && !state.selectedTable && ["menu","cart","customer"].includes(target)) target = "table-select";
+      if (state.user.role === "admin") target = ["admin","tables","pos"].includes(target) ? target : "admin";
+      if (state.user.role === "staff") target = ["staff","tables","pos"].includes(target) ? target : "staff";
       document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
       $(target)?.classList.add("active");
+      localStorage.setItem("itailaew_current_page", target);
       if (target === "admin") loadDashboard();
       if (target === "staff") { loadStaff(); if (!state.polling) state.polling = setInterval(loadStaff, 8000); }
+      if (target === "table-select") loadCustomerTables();
+      if (target === "menu") loadMenus();
+      if (target === "reservation") { setReservationMinimum(); loadReservations(); }
+      if (target === "customer") { loadCustomer(); if (!state.polling) state.polling = setInterval(loadCustomer, 8000); }
+      if (target === "cart") renderCart();
+      if (target === "tables") { loadTables(); if (!state.polling) state.polling = setInterval(loadTables, 8000); }
+      if (target === "pos") loadPos();
     } catch (_) {
       // Best effort: if the token is still accepted, transfer/clear table ownership
       // before clearing the expired local session.
@@ -159,26 +184,6 @@ const App = (() => {
     }
   }
 
-  function scheduleSessionCleanup(){
-    if(state.sessionTimer) clearTimeout(state.sessionTimer);
-    if(!state.token) return;
-    // Firebase ID tokens are JWTs. Leave the table while the token is still
-    // accepted, then clear the local session after the token expires.
-    try{
-      const part=String(state.token).split('.')[1];
-      if(!part) return;
-      const payload=JSON.parse(atob(part.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-part.length%4)%4)));
-      if(!payload.exp) return;
-      const delay=Math.max(1000, Number(payload.exp)*1000-Date.now()-30000);
-      state.sessionTimer=setTimeout(async()=>{
-        if(state.user?.role==='customer' && state.selectedTable && state.token){
-          try{await api('/api/customer/leave',{method:'POST',body:JSON.stringify({reason:'session_expired'})});}catch(_){ }
-        }
-        state.user=null; state.token=null; localStorage.removeItem('itailaew_token'); state.selectedTable=null; state.cart={}; refreshNav();
-        document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); $('login')?.classList.add('active'); authMode('login'); toast('Session หมดอายุ โต๊ะและบิลถูกยกเลิกแล้ว');
-      }, delay);
-    }catch(_){ }
-  }
 
   async function loadMenus(page = state.menuPage) {
     try {
